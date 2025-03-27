@@ -8,7 +8,7 @@ We are going to implement a parallel SAT solver on a multicore CPU, an NVIDIA GP
 
 ### Background
 
-All efficiently verifiable computational problems can be transformed efficiently to an instance of CNF-SAT: given a conjunction of disjunctive clauses, does a satisfying assignment exist? And if so, what assignment? The DPLL algorithm solves CNF-SAT problems by assigning literals, identifying unit clauses and pure literals, and backtracking after reaching a contradiction. The psuedocode for DPLL is described below:
+All efficiently verifiable computational problems can be transformed efficiently to an instance of CNF-SAT: given a conjunction of disjunctive clauses, does a satisfying assignment exist? And if so, what assignment? The DPLL algorithm solves CNF-SAT problems by assigning literals, identifying unit clauses and pure literals, and backtracking after reaching a contradiction. The pseudocode for DPLL is described below:
 
 ```
 Algorithm DPLL
