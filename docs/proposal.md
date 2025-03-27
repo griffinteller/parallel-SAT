@@ -50,8 +50,8 @@ Additionally, we see several opportunities to augment the DPLL algorithm with co
 ### Resources
 
 There are many resources online explaining SAT solving algorithms and associated data structures, but Ruben Martins lecture notes on SAT solvers from 15-414: Bug Catching are particularly helpful: <br>
-https://www.cs.cmu.edu/~15414/s22/s21/lectures/12-sat-solving.pdf <br>
-https://www.cs.cmu.edu/~15414/f18/2018/lectures/20-sat-techniques.pdf
+[SAT solving & DPLL](https://www.cs.cmu.edu/~15414/s22/s21/lectures/12-sat-solving.pdf) <br>
+[Efficient Data Structures for DPLL](https://www.cs.cmu.edu/~15414/f18/2018/lectures/20-sat-techniques.pdf)
 
 We'll be starting from scratch for our implementations. 
 
@@ -60,14 +60,14 @@ In terms of hardware, we will start with the GHC machines for both multicore CPU
 ### Goals and Deliverables
 
 **Plan to achieve**
-- Sequential implementation of DPLL
-- Multi-core implementation of DPLL
-- GPU implementation of DPLL
-- Augmentation of multi-core implementation with inter-process communication
-- Create testing framework and benchmarks
-- Analysis of the characteristics of various data structures for the CNF formula and assignment state
-- Analysis of performance bottlenecks on various implementations
-- Analysis of various implementations under different workloads
+- Sequential implementation of DPLL. We will spend some time optimizing this implementation to
+enable a fair comparison to parallel implementations, but  this will not be a major focus of our final report.
+- Multi-core implementation of DPLL. Without augmenting the algorithm with additionaly communication between threads, this should be a relatively simple implementation, and we will focus first on analyzing and optimizing state data structures for multi-core parallelism. 
+- GPU implementation of DPLL. We expect to iterate over many approaches to scheduling and data structure, and we'll compare these in our final report.
+- Augmentation of multi-core implementation with communication between threads. At the very least, we would like to determine if early termination from the `unit-propogate` is worth the communication overhead and to analyze the behavior of this approach across different workloads. 
+- Create testing framework and benchmarks. We need to collect a suitable library of SAT problems, code to load these problems, and develop timing instrumentation.
+- Analysis of performance between machine types and across workloads
+- Analysis of performance within machine types across data structure iterations, communication choices, and other design decisions and parameters
 
 **Hope to achieve**
 - *Ahead of schedule*
