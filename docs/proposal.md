@@ -81,6 +81,7 @@ In terms of hardware, we will start with the GHC machines for both multicore CPU
 ### Schedule
 
 **Deliverable schedule**
+
 | Date | Deliverable              |
 | ---- | ------------------------ |
 | 3/26 | Project Proposal         |
@@ -89,6 +90,7 @@ In terms of hardware, we will start with the GHC machines for both multicore CPU
 | 4/29 | Poster Session           |
 
 **Project schedule**
+
 | Week        | Tasks                                                                                                            |
 | ----------- | ---------------------------------------------------------------------------------------------------------------- |
 | 3/24 - 3/30 | - finish project proposal <br> - study existing research <br> - write sequential reference implementation        |
