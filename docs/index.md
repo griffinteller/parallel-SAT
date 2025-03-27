@@ -1,4 +1,3 @@
-# Parallel DPLL SAT Solver
 **Benjamin Colby**
 **Griffin Teller**
 

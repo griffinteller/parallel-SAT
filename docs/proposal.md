@@ -1,4 +1,4 @@
-# Parallel DPLL SAT Solver: Project Proposal
+# Project Proposal
 
 **Benjamin Colby**, **Griffin Teller**
 
