@@ -36,7 +36,7 @@ function DPLL(Φ)
 ```
 [citation for psuedocode](https://en.wikipedia.org/wiki/DPLL_algorithm#The_algorithm)
 
-While still potentially exponential in time complexity, DPLL terminates efficiently for many natural problem instances. Additionally, the DPLL algorithm provides two possibles modes of parallelism: first, over the recursive call tree, and second over the inner routines (`unit-propogate` and `pure-literal-assign`).
+While still potentially exponential in time complexity, DPLL terminates efficiently for many natural problem instances. Additionally, the DPLL algorithm provides two possible modes of parallelism: first, over the recursive call tree, and second over the inner routines (`unit-propogate` and `pure-literal-assign`).
 
 ### The Challenge
 
@@ -72,7 +72,7 @@ In terms of hardware, we will start with the GHC machines for both multicore CPU
 **Hope to achieve**
 - *Ahead of schedule*
     - FPGA implementation of DPLL
-    - Experiment with heterogenous hardware
+    - Experiment with heterogeneous hardware
     - Analysis of power consumption of various implementations
 - *Behind schedule*
     - Forgo inter-process communication
@@ -96,5 +96,5 @@ In terms of hardware, we will start with the GHC machines for both multicore CPU
 | 3/24 - 3/30 | - finish project proposal <br> - study existing research <br> - write sequential reference implementation        |
 | 3/31 - 4/6  | - write multi-core implementation <br> - create testing framework <br> - create benchmarks                       |
 | 4/7 - 4/13  | - write GPU implementation <br> - perform bottleneck and workload analysis <br> - write project milestone report |
-| 4/14 - 4/20 | - augment multi-core implementation with inter-process communication <br> - heterogenous hardware analysis       |
+| 4/14 - 4/20 | - augment multi-core implementation with inter-process communication <br> - heterogeneous hardware analysis      |
 | 4/21 - 4/27 | - perform final performance analysis <br> - write the final report <br> - prepare for poster session             |
