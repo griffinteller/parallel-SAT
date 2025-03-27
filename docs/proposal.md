@@ -34,7 +34,7 @@ function DPLL(Φ)
     l ← choose-literal(Φ);
     return DPLL(Φ ∧ {l}) or DPLL(Φ ∧ {¬l});
 ```
-(citation for psuedocode) [https://en.wikipedia.org/wiki/DPLL_algorithm#The_algorithm]
+[citation for psuedocode](https://en.wikipedia.org/wiki/DPLL_algorithm#The_algorithm)
 
 While still potentially exponential in time complexity, DPLL terminates efficiently for many natural problem instances. Additionally, the DPLL algorithm provides two possibles modes of parallelism: first, over the recursive call tree, and second over the inner routines (`unit-propogate` and `pure-literal-assign`).
 
@@ -49,8 +49,8 @@ Additionally, we see several opportunities to augment the DPLL algorithm with co
 
 ### Resources
 
-There are many resources online explaining SAT solving algorithms and associated data structures, but Ruben Martins lecture notes on SAT solvers from 15-414: Bug Catching are particularly helpful:
-https://www.cs.cmu.edu/~15414/s22/s21/lectures/12-sat-solving.pdf
+There are many resources online explaining SAT solving algorithms and associated data structures, but Ruben Martins lecture notes on SAT solvers from 15-414: Bug Catching are particularly helpful: <br>
+https://www.cs.cmu.edu/~15414/s22/s21/lectures/12-sat-solving.pdf <br>
 https://www.cs.cmu.edu/~15414/f18/2018/lectures/20-sat-techniques.pdf
 
 We'll be starting from scratch for our implementations. 
