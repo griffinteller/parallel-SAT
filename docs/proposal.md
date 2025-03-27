@@ -79,6 +79,10 @@ enable a fair comparison to parallel implementations, but  this will not be a ma
     - Forgo communication augmentation
     - Shorter analysis of data structures
 
+### Platform
+
+Like we discussed above, we expect CPUs and GPUs to exploit different parts of the parallelism of this problem more effectively than the other, and we are interested in the comparison between the two. We don't expect either to be perfectly suited to this problem, but we are interested in analyzing the effect of the constraints of widely available hardware. If time permits, we are also interested in developing a parallel solution to the SAT problem on an FPGA, to explore what hardware choices might be more suited to the problem than either of the other platforms.
+
 ### Schedule
 
 **Deliverable schedule**
