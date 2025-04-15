@@ -191,7 +191,6 @@ int main() {
     if (dpll(formula, assignment)) {
         cout << "The formula is SATISFIABLE." << endl;
         cout << "Satisfying assignment:" << endl;
-        // Print the assignment: variable -> true/false.
         for (const auto &entry : assignment) {
             cout << "Variable " << entry.first << " = " 
                  << (entry.second ? "true" : "false") << endl;
