@@ -13,23 +13,35 @@ using namespace std;
 using namespace std::chrono;
 
 int main(int argc, char **argv) {
+    bool parallel = false;
+    int argIndex = 1;
+    
+    // usage: solver [-P] <benchmark_file_path>
     if (argc < 2) {
-        cerr << "Usage: " << argv[0] << " <benchmark_file_path>" << endl;
+        cerr << "Usage: " << argv[0] << " [-P] <benchmark_file_path>" << endl;
+        return 1;
+    }
+    if (string(argv[argIndex]) == "-P") {
+        parallel = true;
+        argIndex++;
+    }
+    if (argc <= argIndex) {
+        cerr << "Error: Benchmark file path missing" << endl;
         return 1;
     }
 
-    string file_path = argv[1];
+    string file_path = argv[argIndex];
     ifstream infile(file_path);
     if (!infile) {
         cerr << "Error: Unable to open file " << file_path << endl;
         return 1;
     }
 
+    // parse CNF file to generate formula
     Formula formula;
     string line;
     bool pLineFound = false;
-
-    while(getline(infile, line)) {
+    while (getline(infile, line)) {
         if (line.empty() || line[0] == 'c') {
             continue;
         }
@@ -40,7 +52,7 @@ int main(int argc, char **argv) {
         if (pLineFound) {
             istringstream iss(line);
             int lit;
-            Clause clause;
+            vector<int> clause;
             while (iss >> lit) {
                 if (lit == 0) {
                     break;
@@ -57,9 +69,15 @@ int main(int argc, char **argv) {
     unordered_map<int, bool> assignment;
 
     auto start = steady_clock::now();
-    bool result = dpll(formula, assignment);
-    auto end = steady_clock::now();
+    bool result;
+    
+    if (parallel) {
+        result = dpll_parallel(formula, assignment);
+    } else {
+        result = dpll(formula, assignment);
+    }
 
+    auto end = steady_clock::now();
     duration<double> elapsed = end - start;
 
     cout << "The formula is " << (result ? "SATISFIABLE." : "UNSATISFIABLE.") << endl;
@@ -78,7 +96,6 @@ int main(int argc, char **argv) {
     else {
         expected = true;
     }
-
     if (result == expected) {
         cout << "TEST PASSED" << endl;
     } else {

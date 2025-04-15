@@ -4,6 +4,7 @@
 # directories to include
 !*/
 !*/cpu
+!cpu/**
 !*/docs
 !*/benchmarks
 !benchmarks/**

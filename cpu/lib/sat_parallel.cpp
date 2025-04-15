@@ -1,11 +1,12 @@
 #include <sat.h>
-
 #include <iostream>
 #include <vector>
 #include <unordered_map>
+#include <cstdlib>
+#include <pthread.h>
+
 using namespace std;
 
-        
 using Clause = vector<int>; // positive literal -> true, negative literal -> false
 using Formula = vector<Clause>;
 
@@ -17,7 +18,7 @@ using Formula = vector<Clause>;
  *  - formula: the CNF formula
  * Returns: the new formula with literal assigned
  */
-Formula propagateLiteral(int literal, const Formula &formula) {
+Formula propagateLiteral_parallel(int literal, const Formula &formula) {
     Formula newFormula;
 
     for (const auto &clause : formula) {
@@ -52,7 +53,7 @@ Formula propagateLiteral(int literal, const Formula &formula) {
  *  - formula: the CNF formula
  * Returns: literal contained within unit clause, otherwise 0
  */
-int findUnitClause(const Formula &formula) {
+int findUnitClause_parallel(const Formula &formula) {
     for (const auto &clause : formula) {
         if (clause.size() == 1) {
             return clause[0];
@@ -68,7 +69,7 @@ int findUnitClause(const Formula &formula) {
  *  - formula: the CNF formula
  * Returns: the pure literal if found, otherwise 0
  */
-int findPureLiteral(const Formula &formula) {
+int findPureLiteral_parallel(const Formula &formula) {
     // list all literals
     unordered_map<int, bool> literalSet;
     for (const auto &clause : formula) {
@@ -76,7 +77,6 @@ int findPureLiteral(const Formula &formula) {
             literalSet[lit] = true;
         }
     }
-
     // look for pure literal
     for (auto &entry : literalSet) {
         int lit = entry.first;
@@ -95,7 +95,7 @@ int findPureLiteral(const Formula &formula) {
  *  - formula: the CNF formula
  * Returns: the literal to assign, otherwise 0
  */
-int chooseLiteral(const Formula &formula) {
+int chooseLiteral_parallel(const Formula &formula) {
     for (const auto &clause : formula) {
         if (!clause.empty()) {
             return clause[0];
@@ -105,40 +105,53 @@ int chooseLiteral(const Formula &formula) {
 }
 
 /**
- * Attempts to solve a SAT formula in CNF.
+ * Structure for thread data
+ *  - formula: the CNF formula
+ *  - assignment: the literal assignments
+ *  - result: satisfiability of the formula
+ */
+struct DPLLThreadData {
+    Formula formula;
+    unordered_map<int, bool> assignment;
+    bool result;
+};
+
+void* dpllThread(void* arg) {
+    DPLLThreadData* data = static_cast<DPLLThreadData*>(arg);
+    data->result = dpll(data->formula, data->assignment);
+    return nullptr;
+}
+
+/**
+ * Attempts to solve a SAT formula in CNF using fork–join parallelism with pthreads.
  * 
  * Arguments:
  *  - formula: the CNF formula
- *  - assignment: the satisfying assignment
+ *  - assignment: the satisfying assignment (if found)
  * Returns:
  *  - true if satisfiable, false otherwise
- *  - satisfying assignment, if found
  */
-bool dpll(Formula formula, unordered_map<int, bool> &assignment) {
+bool dpll_parallel(Formula formula, unordered_map<int, bool> &assignment) {
     // --- Unit Propagation ---
-    int unitLiteral = findUnitClause(formula);
+    int unitLiteral = findUnitClause_parallel(formula);
     while (unitLiteral != 0) {
         // assign literal
         assignment[abs(unitLiteral)] = (unitLiteral > 0);
-        
         // propogate literal
-        formula = propagateLiteral(unitLiteral, formula);
-
+        formula = propagateLiteral_parallel(unitLiteral, formula);
         // find unit clause
-        unitLiteral = findUnitClause(formula);
+        unitLiteral = findUnitClause_parallel(formula);
     }
 
     // --- Pure Literal Elimination ---
-    int pureLiteral = findPureLiteral(formula);
+    int pureLiteral = findPureLiteral_parallel(formula);
     while (pureLiteral != 0) {
         // assign literal
         assignment[abs(pureLiteral)] = (pureLiteral > 0);
-
         // propogate literal
-        formula = propagateLiteral(pureLiteral, formula);
-
+        formula = propagateLiteral_parallel(pureLiteral, formula);
         // find pure literal
-        pureLiteral = findPureLiteral(formula);
+        pureLiteral = findPureLiteral_parallel(formula);
     }
 
     // --- Stopping Conditions ---
@@ -146,35 +159,52 @@ bool dpll(Formula formula, unordered_map<int, bool> &assignment) {
     if (formula.empty()) {
         return true;
     }
-    // if any clause is empty, the formula is not satisfiable
+    // if any clause is empty, the formula is unsatisfiable
     for (const auto &clause : formula) {
         if (clause.empty()) {
             return false;
         }
     }
 
-    // --- Recursion ---
+    // --- Recursion using pthreads ---
     int literal = chooseLiteral(formula);
 
-    // assign the literal to true
-    {
-        auto assignmentCopy = assignment;
-        Formula formulaCopy = propagateLiteral(literal, formula);
-        assignmentCopy[abs(literal)] = (literal > 0);
-        if (dpll(formulaCopy, assignmentCopy)) {
-            assignment = assignmentCopy;
-            return true;
-        }
+    // data for thread with literal assignment true
+    DPLLThreadData* pos_data = new DPLLThreadData;
+    pos_data->formula = propagateLiteral_parallel(literal, formula);
+    pos_data->assignment = assignment;
+    pos_data->assignment[abs(literal)] = (literal > 0);
+
+    // data for thread with literal assignment false
+    DPLLThreadData* neg_data = new DPLLThreadData;
+    neg_data->formula = propagateLiteral_parallel(-literal, formula);
+    neg_data->assignment = assignment;
+    neg_data->assignment[abs(literal)] = !(literal > 0);
+
+    // spawn threads
+    pthread_t pos_thread, neg_thread;
+    pthread_create(&pos_thread, nullptr, dpllThread, static_cast<void*>(pos_data));
+    pthread_create(&neg_thread, nullptr, dpllThread, static_cast<void*>(neg_data));
+
+    // wait for threads to finish
+    pthread_join(pos_thread, nullptr);
+    pthread_join(neg_thread, nullptr);
+
+    // check thread results
+    if (pos_data->result) {
+        assignment = pos_data->assignment;
+        delete pos_data;
+        delete neg_data;
+        return true;
     }
-    // assign the literal to false
-    {
-        auto assignmentCopy = assignment;
-        Formula formulaCopy = propagateLiteral(-literal, formula);
-        assignmentCopy[abs(literal)] = !(literal > 0);
-        if (dpll(formulaCopy, assignmentCopy)) {
-            assignment = assignmentCopy;
-            return true;
-        }
+    if (neg_data->result) {
+        assignment = neg_data->assignment;
+        delete pos_data;
+        delete neg_data;
+        return true;
     }
+
+    delete pos_data;
+    delete neg_data;
     return false;
 }

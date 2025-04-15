@@ -15,6 +15,7 @@ using Formula = vector<Clause>;
  * Returns: the new formula with literal assigned
  */
 Formula propagateLiteral(int literal, const Formula &formula);
+Formula propagateLiteral_parallel(int literal, const Formula &formula);
 
 /**
  * Returns the literal contained in the first unit clause found.
@@ -24,6 +25,7 @@ Formula propagateLiteral(int literal, const Formula &formula);
  * Returns: literal contained within unit clause, otherwise 0
  */
 int findUnitClause(const Formula &formula);
+int findUnitClause_parallel(const Formula &formula);
 
 /**
  * Returns the first pure literal if found.
@@ -33,6 +35,7 @@ int findUnitClause(const Formula &formula);
  * Returns: the pure literal if found, otherwise 0
  */
 int findPureLiteral(const Formula &formula);
+int findPureLiteral_parallel(const Formula &formula);
 
 /**
  * Choose a literal to assign within the formula.
@@ -43,6 +46,7 @@ int findPureLiteral(const Formula &formula);
  * Returns: the literal to assign, otherwise 0
  */
 int chooseLiteral(const Formula &formula);
+int chooseLiteral_parallel(const Formula &formula);
 
 /**
  * Attempts to solve a SAT formula in CNF.
@@ -55,3 +59,4 @@ int chooseLiteral(const Formula &formula);
  *  - satisfying assignment, if found
  */
 bool dpll(Formula formula, unordered_map<int, bool> &assignment);
+bool dpll_parallel(Formula formula, unordered_map<int, bool> &assignment);
