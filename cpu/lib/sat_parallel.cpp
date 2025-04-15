@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <cstdlib>
 #include <pthread.h>
+#include <unistd.h>
 
 using namespace std;
 
@@ -172,9 +173,28 @@ bool dpll_parallel(Formula formula, unordered_map<int, bool> &assignment, int de
     // --- Recursion using pthreads ---
     int literal = chooseLiteral(formula);
 
-    // fall back to sequential if we have reached the max depth
+    // fall back to sequential algorithm if we have reached max recurse depth
     if (depth >= MAX_DEPTH) {
-        return dpll(formula, assignment);
+        // assign the literal to true
+        {
+            auto assignmentCopy = assignment;
+            Formula formulaCopy = propagateLiteral(literal, formula);
+            assignmentCopy[abs(literal)] = (literal > 0);
+            if (dpll(formulaCopy, assignmentCopy)) {
+                assignment = assignmentCopy;
+                return true;
+            }
+        }
+        // assign the literal to false
+        {
+            auto assignmentCopy = assignment;
+            Formula formulaCopy = propagateLiteral(-literal, formula);
+            assignmentCopy[abs(literal)] = !(literal > 0);
+            if (dpll(formulaCopy, assignmentCopy)) {
+                assignment = assignmentCopy;
+                return true;
+            }
+        }
     }
 
     // data for thread with literal assignment true
@@ -203,22 +223,41 @@ bool dpll_parallel(Formula formula, unordered_map<int, bool> &assignment, int de
         cerr << "Error creating thread!: " << err << endl;
     }
 
-    // wait for threads to finish
-    pthread_join(pos_thread, nullptr);
-    pthread_join(neg_thread, nullptr);
+    bool pos_done = false, neg_done = false;
 
-    // check thread results
-    if (pos_data->result) {
-        assignment = pos_data->assignment;
-        delete pos_data;
-        delete neg_data;
-        return true;
-    }
-    if (neg_data->result) {
-        assignment = neg_data->assignment;
-        delete pos_data;
-        delete neg_data;
-        return true;
+    // wait for threads to finish
+    while (!pos_done || !neg_done) {
+        if (!pos_done) {
+            if (pthread_tryjoin_np(pos_thread, nullptr) == 0) {
+                pos_done = true;
+
+                if (pos_data->result) {
+                    // solution found, cancel the other thread
+                    pthread_cancel(neg_thread);
+                    pthread_join(neg_thread, nullptr);
+                    assignment = pos_data->assignment;
+                    delete pos_data;
+                    delete neg_data;
+                    return true;
+                }
+            }
+        }
+        if (!neg_done) {
+            if (pthread_tryjoin_np(neg_thread, nullptr) == 0) {
+                neg_done = true;
+
+                if (neg_data->result) {
+                    // solution found, cancel the other thread
+                    pthread_cancel(pos_thread);
+                    pthread_join(pos_thread, nullptr);
+                    assignment = neg_data->assignment;
+                    delete pos_data;
+                    delete neg_data;
+                    return true;
+                }
+            }
+        }
+        // usleep(100);
     }
 
     delete pos_data;
