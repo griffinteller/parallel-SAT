@@ -1,202 +1,90 @@
 #include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
 #include <vector>
 #include <unordered_map>
+#include <cstdlib>
+#include <chrono>
+
+#include "sat.h"
+
 using namespace std;
+using namespace std::chrono;
 
-        
-using Clause = vector<int>; // positive literal -> true, negative literal -> false
-using Formula = vector<Clause>;
+int main(int argc, char **argv) {
+    if (argc < 2) {
+        cerr << "Usage: " << argv[0] << " <benchmark_file_path>" << endl;
+        return 1;
+    }
 
-/**
- * Propogate literal assignment to formula, returns new formula.
- * 
- * Arguments:
- *  - literal: the assigned literal
- *  - formula: the CNF formula
- * Returns: the new formula with literal assigned
- */
-Formula propagateLiteral(int literal, const Formula &formula) {
-    Formula newFormula;
+    string file_path = argv[1];
+    ifstream infile(file_path);
+    if (!infile) {
+        cerr << "Error: Unable to open file " << file_path << endl;
+        return 1;
+    }
 
-    for (const auto &clause : formula) {
-        bool clauseSatisfied = false;
-        Clause newClause;
+    Formula formula;
+    string line;
+    bool pLineFound = false;
 
-        for (int lit : clause) {
-            if (lit == literal) {
-                // if the clause is satisfied, we are done
-                clauseSatisfied = true;
-                break;
-            } else if (lit == -literal) {
-                // skip negated literals
-                continue;
-            } else {
-                // add existing literal to clause
-                newClause.push_back(lit);
+    while(getline(infile, line)) {
+        if (line.empty() || line[0] == 'c') {
+            continue;
+        }
+        if (line[0] == 'p') {
+            pLineFound = true;
+            continue;
+        }
+        if (pLineFound) {
+            istringstream iss(line);
+            int lit;
+            Clause clause;
+            while (iss >> lit) {
+                if (lit == 0) {
+                    break;
+                }
+                clause.push_back(lit);
+            }
+            if (!clause.empty()) {
+                formula.push_back(clause);
             }
         }
-        if (!clauseSatisfied) {
-            // add unsatisfied clauses to formula
-            newFormula.push_back(newClause);
-        }
     }
-    return newFormula;
-}
-
-/**
- * Returns the literal contained in the first unit clause found.
- * 
- * Arguments:
- *  - formula: the CNF formula
- * Returns: literal contained within unit clause, otherwise 0
- */
-int findUnitClause(const Formula &formula) {
-    for (const auto &clause : formula) {
-        if (clause.size() == 1) {
-            return clause[0];
-        }
-    }
-    return 0; // no literal found
-}
-
-/**
- * Returns the first pure literal if found.
- * 
- * Arguments:
- *  - formula: the CNF formula
- * Returns: the pure literal if found, otherwise 0
- */
-int findPureLiteral(const Formula &formula) {
-    // list all literals
-    unordered_map<int, bool> literalSet;
-    for (const auto &clause : formula) {
-        for (int lit : clause) {
-            // Insert literal with a dummy true value; we only care about the keys.
-            literalSet[lit] = true;
-        }
-    }
-
-    // look for pure literal
-    for (auto &entry : literalSet) {
-        int lit = entry.first;
-        if (literalSet.find(-lit) == literalSet.end()) {
-            return lit;
-        }
-    }
-    return 0; // pure literal not found
-}
-
-/**
- * Choose a literal to assign within the formula.
- * Heuristic: select the first literal from the first non-empty clause.
- * 
- * Arguments:
- *  - formula: the CNF formula
- * Returns: the literal to assign, otherwise 0
- */
-int chooseLiteral(const Formula &formula) {
-    for (const auto &clause : formula) {
-        if (!clause.empty()) {
-            return clause[0];
-        }
-    }
-    return 0; // no literals left to assign
-}
-
-/**
- * Attempts to solve a SAT formula in CNF.
- * 
- * Arguments:
- *  - formula: the CNF formula
- *  - assignment: the satisfying assignment
- * Returns:
- *  - true if satisfiable, false otherwise
- *  - satisfying assignment, if found
- */
-bool dpll(Formula formula, unordered_map<int, bool> &assignment) {
-    // --- Unit Propagation ---
-    int unitLiteral = findUnitClause(formula);
-    while (unitLiteral != 0) {
-        // assign literal
-        assignment[abs(unitLiteral)] = (unitLiteral > 0);
-        
-        // propogate literal
-        formula = propagateLiteral(unitLiteral, formula);
-
-        // find unit clause
-        unitLiteral = findUnitClause(formula);
-    }
-
-    // --- Pure Literal Elimination ---
-    int pureLiteral = findPureLiteral(formula);
-    while (pureLiteral != 0) {
-        // assign literal
-        assignment[abs(pureLiteral)] = (pureLiteral > 0);
-
-        // propogate literal
-        formula = propagateLiteral(pureLiteral, formula);
-
-        // find pure literal
-        pureLiteral = findPureLiteral(formula);
-    }
-
-    // --- Stopping Conditions ---
-    // if the formula is empty, the formula is satisfiable
-    if (formula.empty()) {
-        return true;
-    }
-    // if any clause is empty, the formula is not satisfiable
-    for (const auto &clause : formula) {
-        if (clause.empty()) {
-            return false;
-        }
-    }
-
-    // --- Recursion ---
-    int literal = chooseLiteral(formula);
-
-    // assign the literal to true
-    {
-        auto assignmentCopy = assignment;
-        Formula formulaCopy = propagateLiteral(literal, formula);
-        assignmentCopy[abs(literal)] = (literal > 0);
-        if (dpll(formulaCopy, assignmentCopy)) {
-            assignment = assignmentCopy;
-            return true;
-        }
-    }
-    // assign the literal to false
-    {
-        auto assignmentCopy = assignment;
-        Formula formulaCopy = propagateLiteral(-literal, formula);
-        assignmentCopy[abs(literal)] = false;
-        if (dpll(formulaCopy, assignmentCopy)) {
-            assignment = assignmentCopy;
-            return true;
-        }
-    }
-    return false;
-}
-
-int main() {
-    // Define a CNF formula:
-    // (x1 ∨ x2) ∧ (¬x1 ∨ x3) ∧ (¬x2 ∨ ¬x3)
-    Formula formula = {
-        {1, 2},    // Clause 1: x1 ∨ x2
-        {-1, 3},   // Clause 2: ¬x1 ∨ x3
-        {-2, -3}   // Clause 3: ¬x2 ∨ ¬x3
-    };
+    infile.close();
 
     unordered_map<int, bool> assignment;
-    if (dpll(formula, assignment)) {
-        cout << "The formula is SATISFIABLE." << endl;
+
+    auto start = steady_clock::now();
+    bool result = dpll(formula, assignment);
+    auto end = steady_clock::now();
+
+    duration<double> elapsed = end - start;
+
+    cout << "The formula is " << (result ? "SATISFIABLE." : "UNSATISFIABLE.") << endl;
+    if (result) {
         cout << "Satisfying assignment:" << endl;
         for (const auto &entry : assignment) {
-            cout << "Variable " << entry.first << " = " 
+            cout << "   Variable " << entry.first << " = " 
                  << (entry.second ? "true" : "false") << endl;
         }
-    } else {
-        cout << "The formula is UNSATISFIABLE." << endl;
     }
+
+    bool expected;
+    if (file_path.find("uuf") != string::npos) {
+        expected = false;
+    }
+    else {
+        expected = true;
+    }
+
+    if (result == expected) {
+        cout << "TEST PASSED" << endl;
+    } else {
+        cout << "TEST FAILED" << endl;
+    }
+    cout << "Elapsed time: " << elapsed.count() << " seconds" << endl;
+
     return 0;
 }

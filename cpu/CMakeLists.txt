@@ -15,3 +15,9 @@ set(solve-sources
 
 add_executable(solve ${solve-sources})
 target_link_libraries(solve PRIVATE parallel-sat)
+
+set(CNF_PATH "" CACHE STRING "Path to the CNF file benchmark input")
+if(CNF_PATH)
+    message(STATUS "CNF_PATH is set to: ${CNF_PATH}")
+    target_compile_definitions(solve PRIVATE CNF_PATH=\"${CNF_PATH}\")
+endif()
