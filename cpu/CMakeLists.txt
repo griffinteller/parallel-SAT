@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.29)
+cmake_minimum_required(VERSION 3.26)
 project(Terrain)
 
 set(CMAKE_CXX_STANDARD 23)
@@ -16,6 +16,7 @@ set(solve-sources
 
 add_executable(solve ${solve-sources})
 target_link_libraries(solve PRIVATE parallel-sat)
+target_link_libraries(solve PRIVATE pthread)
 
 set(CNF_PATH "" CACHE STRING "Path to the CNF file benchmark input")
 if(CNF_PATH)

@@ -59,4 +59,4 @@ int chooseLiteral_parallel(const Formula &formula);
  *  - satisfying assignment, if found
  */
 bool dpll(Formula formula, unordered_map<int, bool> &assignment);
-bool dpll_parallel(Formula formula, unordered_map<int, bool> &assignment);
+bool dpll_parallel(Formula formula, unordered_map<int, bool> &assignment, int depth = 0);

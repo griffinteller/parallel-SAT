@@ -10,6 +10,8 @@ using namespace std;
 using Clause = vector<int>; // positive literal -> true, negative literal -> false
 using Formula = vector<Clause>;
 
+const int MAX_DEPTH = 3;
+
 /**
  * Propogate literal assignment to formula, returns new formula.
  * 
@@ -114,11 +116,12 @@ struct DPLLThreadData {
     Formula formula;
     unordered_map<int, bool> assignment;
     bool result;
+    int depth;
 };
 
 void* dpllThread(void* arg) {
     DPLLThreadData* data = static_cast<DPLLThreadData*>(arg);
-    data->result = dpll(data->formula, data->assignment);
+    data->result = dpll_parallel(data->formula, data->assignment, data->depth);
     return nullptr;
 }
 
@@ -131,7 +134,7 @@ void* dpllThread(void* arg) {
  * Returns:
  *  - true if satisfiable, false otherwise
  */
-bool dpll_parallel(Formula formula, unordered_map<int, bool> &assignment) {
+bool dpll_parallel(Formula formula, unordered_map<int, bool> &assignment, int depth) {
     // --- Unit Propagation ---
     int unitLiteral = findUnitClause_parallel(formula);
     while (unitLiteral != 0) {
@@ -169,22 +172,36 @@ bool dpll_parallel(Formula formula, unordered_map<int, bool> &assignment) {
     // --- Recursion using pthreads ---
     int literal = chooseLiteral(formula);
 
+    // fall back to sequential if we have reached the max depth
+    if (depth >= MAX_DEPTH) {
+        return dpll(formula, assignment);
+    }
+
     // data for thread with literal assignment true
     DPLLThreadData* pos_data = new DPLLThreadData;
     pos_data->formula = propagateLiteral_parallel(literal, formula);
     pos_data->assignment = assignment;
     pos_data->assignment[abs(literal)] = (literal > 0);
+    pos_data->depth = depth + 1;
 
     // data for thread with literal assignment false
     DPLLThreadData* neg_data = new DPLLThreadData;
     neg_data->formula = propagateLiteral_parallel(-literal, formula);
     neg_data->assignment = assignment;
     neg_data->assignment[abs(literal)] = !(literal > 0);
+    neg_data->depth = depth + 1;
 
     // spawn threads
     pthread_t pos_thread, neg_thread;
-    pthread_create(&pos_thread, nullptr, dpllThread, static_cast<void*>(pos_data));
-    pthread_create(&neg_thread, nullptr, dpllThread, static_cast<void*>(neg_data));
+    int err;
+    err = pthread_create(&pos_thread, nullptr, dpllThread, static_cast<void*>(pos_data));
+    if(err) {
+        cerr << "Error creating thread!: " << err << endl;
+    }
+    err = pthread_create(&neg_thread, nullptr, dpllThread, static_cast<void*>(neg_data));
+    if(err) {
+        cerr << "Error creating thread!: " << err << endl;
+    }
 
     // wait for threads to finish
     pthread_join(pos_thread, nullptr);

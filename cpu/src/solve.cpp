@@ -72,8 +72,10 @@ int main(int argc, char **argv) {
     bool result;
     
     if (parallel) {
-        result = dpll_parallel(formula, assignment);
+        cout << "Running parallel algorithm..." << endl;
+        result = dpll_parallel(formula, assignment, 0);
     } else {
+        cout << "Running sequential algorithm..." << endl;
         result = dpll(formula, assignment);
     }
 
