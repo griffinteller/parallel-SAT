@@ -1,1 +1,7 @@
-**/.idea
+# exclude all files
+*
+
+# directories to include
+!*/cpu
+!*/docs
+!*/benchmarks
