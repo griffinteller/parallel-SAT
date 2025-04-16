@@ -1,0 +1,14 @@
+# exclude all files
+*
+
+# directories to include
+!*/
+!*/cpu
+!cpu/**
+!*/docs
+!docs/**
+!*/benchmarks
+!benchmarks/**
+!*/gpu
+!gpu/**
+!./.gitignore
