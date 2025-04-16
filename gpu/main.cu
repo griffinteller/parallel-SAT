@@ -1,9 +1,12 @@
 #include <cassert>
+#include <chrono>
 #include <functional>
 #include <iostream>
 #include <memory>
 #include <optional>
 #include <vector>
+#include <fstream>
+#include <sstream>
 
 #define CC(x) { \
     cudaError_t err = (x); \
@@ -82,7 +85,7 @@ __global__ void propagateUnits(volatile Assignment* assignment, volatile bool* a
     for (int i = 0; i < clause.count; i++) {
         int literal = clause.literals[i];
         AssignedValue value = getAssig(assignment, literal);
-        printf("literal: %d  value: %d\n", literal, value);
+        // printf("literal: %d  value: %d\n", literal, value);
         if (value == TRUE) {
             // clause is satisfied
             return;
@@ -96,7 +99,7 @@ __global__ void propagateUnits(volatile Assignment* assignment, volatile bool* a
 
     if (numUnassigned != 1) return;
     setAssig(assignment, lastUnassigned, TRUE);
-    printf("lastUnassigned: %d  numUnassigned: %d\n", lastUnassigned, numUnassigned);
+    // printf("lastUnassigned: %d  numUnassigned: %d\n", lastUnassigned, numUnassigned);
     *anyPropagated = true;
 }
 
@@ -148,6 +151,12 @@ void copyFormulaToDevice(const Formula& formula) {
 }
 
 bool dpllHostDirected(const Formula& formula) {
+    const auto startTime = std::chrono::high_resolution_clock::now();
+
+    std::cout << "dpllHostDirected" << std::endl;
+    std::cout << "numLiterals: " << formula.numLiterals << std::endl;
+    std::cout << "numClauses: " << formula.numClauses << std::endl;
+
     copyFormulaToDevice(formula);
 
     Assignment devAssignmentView;
@@ -173,8 +182,8 @@ bool dpllHostDirected(const Formula& formula) {
 
         constexpr int blockSize = 256;
         int numBlocks = (formula.numClauses - 1) / blockSize + 1;
-        std::cout << "numBlocks: " << numBlocks << std::endl;
-        std::cout << "blockSize: " << blockSize << std::endl;
+        // std::cout << "numBlocks: " << numBlocks << std::endl;
+        // std::cout << "blockSize: " << blockSize << std::endl;
 
         while (true) {
             CC(cudaMemcpy(anyPropagated, &f, sizeof(bool), cudaMemcpyHostToDevice));
@@ -184,18 +193,18 @@ bool dpllHostDirected(const Formula& formula) {
             bool shouldContinue;
             CC(cudaMemcpy(&shouldContinue, anyPropagated, sizeof(bool), cudaMemcpyDeviceToHost));
 
-            std::cout << "shouldContinue: " << shouldContinue << std::endl;
+            // std::cout << "shouldContinue: " << shouldContinue << std::endl;
             if (!shouldContinue) break;
         }
 
         // copy and print assignment
         std::vector<AssignedValue> retAssignment(formula.numLiterals);
         cudaMemcpy(retAssignment.data(), devAssignmentView.values, sizeof(int) * formula.numLiterals, cudaMemcpyDeviceToHost);
-        for (int i = 0; i < formula.numLiterals; i++) {
-            std::cout << retAssignment[i] << " ";
-        }
+        // for (int i = 0; i < formula.numLiterals; i++) {
+        //     std::cout << retAssignment[i] << " ";
+        // }
 
-        std::cout << "done propagating" << std::endl;
+        // std::cout << "done propagating" << std::endl;
 
         CC(cudaMemcpy(allClausesSatisfied, &t, sizeof(bool), cudaMemcpyHostToDevice));
         CC(cudaMemcpy(anyFalseClauses, &f, sizeof(bool), cudaMemcpyHostToDevice));
@@ -204,14 +213,14 @@ bool dpllHostDirected(const Formula& formula) {
         bool allTrue;
         CC(cudaMemcpy(&allTrue, allClausesSatisfied, sizeof(bool), cudaMemcpyDeviceToHost));
         if (allTrue) {
-            std::cout << "found all clauses satisfied" << std::endl;
+            // std::cout << "found all clauses satisfied" << std::endl;
             return true;
         }
 
         bool anyFalse;
         CC(cudaMemcpy(&anyFalse, anyFalseClauses, sizeof(bool), cudaMemcpyDeviceToHost));
         if (anyFalse) {
-            std::cout << "found false clause" << std::endl;
+            // std::cout << "found false clause" << std::endl;
             return false;
         }
 
@@ -227,42 +236,99 @@ bool dpllHostDirected(const Formula& formula) {
         assert(unassignedLiteral > 0);
 
         retAssignment[unassignedLiteral - 1] = TRUE;
-        std::cout << "found unassigned literal " << unassignedLiteral << std::endl;
-        std::cout << "assigning " << unassignedLiteral << " to TRUE" << std::endl;
+        // std::cout << "found unassigned literal " << unassignedLiteral << std::endl;
+        // std::cout << "assigning " << unassignedLiteral << " to TRUE" << std::endl;
         CC(cudaMemcpy(devAssignmentView.values, retAssignment.data(), sizeof(int) * formula.numLiterals, cudaMemcpyHostToDevice));
         if (inner()) return true;
 
         retAssignment[unassignedLiteral - 1] = FALSE;
-        std::cout << "assigning " << unassignedLiteral << " to FALSE" << std::endl;
+        // std::cout << "assigning " << unassignedLiteral << " to FALSE" << std::endl;
         CC(cudaMemcpy(devAssignmentView.values, retAssignment.data(), sizeof(int) * formula.numLiterals, cudaMemcpyHostToDevice));
         return inner();
     };
 
-    return inner();
+    const auto initializationEndTime = std::chrono::high_resolution_clock::now();
+    const auto initializationDuration = std::chrono::duration_cast<std::chrono::milliseconds>(initializationEndTime - startTime);
+    std::cout << "Initialization time: " << initializationDuration.count() << " ms" << std::endl;
+
+   bool res = inner();
+
+    const auto endTime = std::chrono::high_resolution_clock::now();
+    const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - initializationEndTime);
+    std::cout << "Total time: " << duration.count() << " ms" << std::endl;
+
+    return res;
 }
 
-int main() {
+int main(int argc, char** argv) {
+    // usage: solver [-P] <benchmark_file_path>
+    if (argc < 2) {
+        std::cerr << "Usage: " << argv[0] << " <benchmark_file_path>" << std::endl;
+        return 1;
+    }
+
+    std::string file_path = argv[1];
+    std::ifstream infile(file_path);
+    if (!infile) {
+        std::cerr << "Error: Unable to open file " << file_path << std::endl;
+        return 1;
+    }
+
+    // parse CNF file to generate formula
+    std::vector<Clause> clauses;
+    std::string line;
+    bool pLineFound = false;
+    int numLiterals;
+    while (std::getline(infile, line)) {
+        if (line.empty() || line[0] == 'c') {
+            continue;
+        }
+        if (line[0] == 'p') {
+            pLineFound = true;
+            // parse the problem line
+            std::istringstream iss(line);
+            std::string tmp;
+            iss >> tmp >> tmp >> numLiterals;
+            continue;
+        }
+        if (pLineFound) {
+            std::istringstream iss(line);
+            int lit;
+            std::vector<int> clause;
+            while (iss >> lit) {
+                if (lit == 0) {
+                    break;
+                }
+                clause.push_back(lit);
+            }
+            if (!clause.empty()) {
+                Clause c;
+                c.count = clause.size();
+                c.literals = new int[c.count];
+                for (int i = 0; i < c.count; i++) {
+                    c.literals[i] = clause[i];
+                }
+                clauses.push_back(c);
+            }
+        }
+    }
+    infile.close();
+
     Formula formula;
-    formula.numLiterals = 10;
-    formula.numClauses = 5;
+    formula.numLiterals = numLiterals;
+    formula.numClauses = clauses.size();
     formula.clauses = new Clause[formula.numClauses];
+    for (size_t i = 0; i < clauses.size(); i++) {
+        formula.clauses[i].count = clauses[i].count;
+        formula.clauses[i].literals = clauses[i].literals;
+    }
 
-    formula.clauses[0].count = 3;
-    formula.clauses[0].literals = new int[3] {1, 2, 3};
-
-    formula.clauses[1].count = 1;
-    formula.clauses[1].literals = new int[1] {-1};
-
-    formula.clauses[2].count = 1;
-    formula.clauses[2].literals = new int[1] {-2};
-
-    formula.clauses[3].count = 2;
-    formula.clauses[3].literals = new int[2] {-3, -2};
-
-    formula.clauses[4].count = 2;
-    formula.clauses[4].literals = new int[2] {5, 7};
-
-    dpllHostDirected(formula);
+    bool sat = dpllHostDirected(formula);
+    if (sat) {
+        std::cout << "SAT" << std::endl;
+    } else {
+        std::cout << "UNSAT" << std::endl;
+    }
 
     return 0;
 }
