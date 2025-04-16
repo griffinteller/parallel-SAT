@@ -6,5 +6,6 @@
 !*/cpu
 !cpu/**
 !*/docs
+!docs/**
 !*/benchmarks
 !benchmarks/**
