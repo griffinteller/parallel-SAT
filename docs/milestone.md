@@ -12,7 +12,7 @@ We have implemented a working DPLL SAT solver for each of the three target archi
     A parallel version that launches new threads when the algorithm recurses, assigning two pthreads to explore independent branches of the two literal assignment cases (assign literal to true, assign literal to false).
 
 - GPU:
-    A parallel version that takes advantage of data parallelism within the inner steps of DPLL (unit literal propogation and unassigned literal search). It does not currently take exploit the parallelism between assignment decisions, though this is what we plan to explore next.
+    A parallel version that takes advantage of data parallelism within the inner steps of DPLL (unit literal propagation and unassigned literal search). It does not currently exploit the parallelism between assignment decisions, though this is what we plan to explore next.
 
 We have also built a testing framework that enables us to analyze the performance of the different implementations under different workloads. Our benchmarks are sourced from [SATLIB](https://www.cs.ubc.ca/~hoos/SATLIB/benchm.html), which contains a database of Uniform Random-3-SAT CNF problems. The benchmarks vary in the total number of literals, the number of clauses, and the satisfiability of the problem.
 
@@ -29,7 +29,7 @@ We gathered the execution time and cache miss rate for both the sequential refer
 | uf150-645 | 858.7970 s | 868.7310 s   | 28.927 %           | 29.129 %             |
 | uf175-753 | Did not terminate
 
-The multi-core implementation exhibits mariginal speedup over the reference implementation for medium-sized benchmarks, and has a higher cache hit rate. Further analysis is needed to determine why the multi-core speedup is so poor, and to characterize the performance with different max fork depths and problem sizes. We need to determine if the process is memory bound for high thread counts and examine cache performance at different levels within the memory heirarchy. A potential improvement over the current implementation is to create a thread pool instead of limiting thread launches to the shallow recursive iterations.
+The multi-core implementation exhibits marginal speedup over the reference implementation for medium-sized benchmarks, and has a higher cache hit rate. Further analysis is needed to determine why the multi-core speedup is so poor, and to characterize the performance with different max fork depths and problem sizes. We need to determine if the process is memory bound for high thread counts and examine cache performance at different levels within the memory hierarchy. A potential improvement over the current implementation is to create a thread pool instead of limiting thread launches to the shallow recursive iterations.
 
 **GPU** 
 
@@ -42,13 +42,13 @@ The multi-core implementation exhibits mariginal speedup over the reference impl
 
 Gathered on an NVIDIA RTX 2070
 
-We see a substantial speedup already over the CPU implementations, though one that is inconsistent between test cases (between ~1.5x ad ~30x, above). Still, are current approach dramatically underutilizes the GPU, with Nsight Compute reporting 1.1% compute throuput, and 2.3% memory throughput. The throughput is currently limited by the relatively small number of clauses in the problems we're solving (100s). To fully utilize GPU resources, we will need to run many different decisions in parallel across different kernels. After implementing this, we will also evaluate the impact of kernel launch overhead, and determine whether it is worth attempting to reassign threads within running kernels instead. We also plan on examining the latency between the host and device during checks
+We see a substantial speedup already over the CPU implementations, though one that is inconsistent between test cases (between ~1.5x ad ~30x, above). Still, our current approach dramatically underutilizes the GPU, with Nsight Compute reporting 1.1% compute throughput, and 2.3% memory throughput. The throughput is currently limited by the relatively small number of clauses in the problems we're solving (100s). To fully utilize GPU resources, we will need to run many different decisions in parallel across different kernels. After implementing this, we will also evaluate the impact of kernel launch overhead, and determine whether it is worth attempting to reassign threads within running kernels instead. We also plan on examining the latency between the host and device during checks.
 
 ### Schedule
 
 We are roughly on track with our original schedule, in which we wanted to have completed a first iteration for single-core, multi-core, and GPU versions of DPLL. We still plan on spending the next few days digging into current performance bottlenecks, and experimenting with the future approaches outlined above. For our deliverables, we expect to have an analysis of speedup and scaling across the three approaches and clause size and literal count. Time permitting, we also plan on demoing a live sodoku solver. We do not plan on exploring an FPGA implementation anymore, which was one of our nice to haves, and we also no longer plan on exploring the unit-propagation early termination idea, since we've since learned that real-world SAT problems have far fewer clauses than can saturate a GPU grid.
 
-Beyond the next steps metioned in the prelimary results, an important step we plan to take is updating our benchmarking to average across problems of a similar size. We learned in our initial benchmarking that the same problem across different approaches can vary wildly in termination time, so averaging across problems of a similar size will give us more robust results.
+Beyond the next steps mentioned in the prelimnary results, an important step we plan to take is updating our benchmarking to average across problems of a similar size. We learned in our initial benchmarking that the same problem across different approaches can vary wildly in termination time, so averaging across problems of a similar size will give us more robust results.
 
 | Timeframe   | Tasks                                                                                                            |
 | ----------- | ---------------------------------------------------------------------------------------------------------------- |
