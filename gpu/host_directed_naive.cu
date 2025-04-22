@@ -65,21 +65,8 @@ __global__ void propagateUnits(volatile Assignment* assignment, volatile bool* a
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= devFormula.numClauses) return;
 
-    // if (tid == 0) {
-    //     // print formula for debugging
-    //     printf("Formula: \n");
-    //     printf("numLiterals: %d\n", devFormula.numLiterals);
-    //     printf("numClauses: %d\n", devFormula.numClauses);
-    //     for (int i = 0; i < devFormula.numClauses; i++) {
-    //         printf("Clause %d: ", i);
-    //         for (int j = 0; j < devFormula.clauses[i].count; j++) {
-    //             printf("%d ", devFormula.clauses[i].literals[j]);
-    //         }
-    //         printf("\n");
-    //     }
-    // }
+    const Clause& clause = devFormula.clauses[tid];
 
-    Clause clause = devFormula.clauses[tid];
     int numUnassigned = 0;
     int lastUnassigned;
     for (int i = 0; i < clause.count; i++) {
@@ -101,6 +88,36 @@ __global__ void propagateUnits(volatile Assignment* assignment, volatile bool* a
     setAssig(assignment, lastUnassigned, TRUE);
     // printf("lastUnassigned: %d  numUnassigned: %d\n", lastUnassigned, numUnassigned);
     *anyPropagated = true;
+}
+
+__global__ void propagatePure(volatile Assignment* assignment) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= devFormula.numLiterals) return;
+
+    AssignedValue value = assignment->values[tid];
+    if (value != UNASSIGNED) return;
+
+    bool foundAny = false;
+    bool polarity;
+    for (int i = 0; i < devFormula.numClauses; i++) {
+        const Clause& clause = devFormula.clauses[i];
+        for (int j = 0; j < clause.count; j++) {
+            if (abs(clause.literals[j]) - 1 == tid) {
+                bool currPolarity = clause.literals[j] - 1 == tid;
+                if (foundAny) {
+                    if (polarity != currPolarity) {
+                        return;
+                    }
+                } else {
+                    foundAny = true;
+                    polarity = currPolarity;
+                }
+            }
+        }
+    }
+
+    // we are a pure literal
+    setAssig(assignment, tid + 1, polarity ? TRUE : FALSE);
 }
 
 __global__ void checkClauses(const volatile Assignment* assignment, volatile bool* anyFalseClauses, volatile bool* allClausesSatisfied) {
@@ -169,33 +186,39 @@ bool dpllHostDirected(const Formula& formula) {
     CC(cudaMalloc(&devAssignment, sizeof(Assignment)));
     CC(cudaMemcpy(devAssignment, &devAssignmentView, sizeof(Assignment), cudaMemcpyHostToDevice));
 
-    bool* anyPropagated;
+    bool* anyUnitPropagated;
     bool* allClausesSatisfied;
     bool* anyFalseClauses;
     CC(cudaMalloc(&allClausesSatisfied, sizeof(bool)));
     CC(cudaMalloc(&anyFalseClauses, sizeof(bool)));
-    CC(cudaMalloc(&anyPropagated, sizeof(bool)));
+    CC(cudaMalloc(&anyUnitPropagated, sizeof(bool)));
 
     std::function<bool()> inner = [=, &inner, &formula] () -> bool {
         bool f = false;
         bool t = true;
 
-        constexpr int blockSize = 256;
-        int numBlocks = (formula.numClauses - 1) / blockSize + 1;
-        // std::cout << "numBlocks: " << numBlocks << std::endl;
-        // std::cout << "blockSize: " << blockSize << std::endl;
+        constexpr int clauseBlockSize = 256;
+        int numClauseBlocks = (formula.numClauses - 1) / clauseBlockSize + 1;
 
+        constexpr int litBlockSize = 256;
+        int numLitBlocks = (formula.numLiterals - 1) / litBlockSize + 1;
+
+        // unit literal propagation
         while (true) {
-            CC(cudaMemcpy(anyPropagated, &f, sizeof(bool), cudaMemcpyHostToDevice));
+            CC(cudaMemcpy(anyUnitPropagated, &f, sizeof(bool), cudaMemcpyHostToDevice));
 
-            propagateUnits<<<numBlocks, blockSize>>>(devAssignment, anyPropagated);
+            propagateUnits<<<numClauseBlocks, clauseBlockSize>>>(devAssignment, anyUnitPropagated);
 
             bool shouldContinue;
-            CC(cudaMemcpy(&shouldContinue, anyPropagated, sizeof(bool), cudaMemcpyDeviceToHost));
+            CC(cudaMemcpy(&shouldContinue, anyUnitPropagated, sizeof(bool), cudaMemcpyDeviceToHost));
 
             // std::cout << "shouldContinue: " << shouldContinue << std::endl;
             if (!shouldContinue) break;
         }
+    
+        // pure literal propagation
+        propagatePure<<<numLitBlocks, litBlockSize>>>(devAssignment);
+
 
         // copy and print assignment
         std::vector<AssignedValue> retAssignment(formula.numLiterals);
@@ -208,7 +231,7 @@ bool dpllHostDirected(const Formula& formula) {
 
         CC(cudaMemcpy(allClausesSatisfied, &t, sizeof(bool), cudaMemcpyHostToDevice));
         CC(cudaMemcpy(anyFalseClauses, &f, sizeof(bool), cudaMemcpyHostToDevice));
-        checkClauses<<<numBlocks, blockSize>>>(devAssignment, anyFalseClauses, allClausesSatisfied);
+        checkClauses<<<numClauseBlocks, clauseBlockSize>>>(devAssignment, anyFalseClauses, allClausesSatisfied);
 
         bool allTrue;
         CC(cudaMemcpy(&allTrue, allClausesSatisfied, sizeof(bool), cudaMemcpyDeviceToHost));
