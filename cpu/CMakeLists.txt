@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD 23)
 include_directories(include)
 
 set(parallel-sat-sources
+   lib/pool.cpp
    lib/sat.cpp
    lib/sat_parallel.cpp)
 

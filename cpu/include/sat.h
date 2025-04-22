@@ -1,5 +1,9 @@
+#pragma once
+
 #include <vector>
 #include <unordered_map>
+
+#include "pool.h"
 
 using namespace std;
 
@@ -59,4 +63,4 @@ int chooseLiteral_parallel(const Formula &formula);
  *  - satisfying assignment, if found
  */
 bool dpll(Formula formula, unordered_map<int, bool> &assignment);
-bool dpll_parallel(Formula formula, unordered_map<int, bool> &assignment, int depth = 0);
+bool dpll_parallel(Formula formula, unordered_map<int, bool> &assignment, ThreadPool &pool);

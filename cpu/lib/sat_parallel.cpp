@@ -1,17 +1,16 @@
 #include <sat.h>
+#include <pool.h>
 #include <iostream>
 #include <vector>
 #include <unordered_map>
 #include <cstdlib>
-#include <pthread.h>
+#include <atomic>
 #include <unistd.h>
 
 using namespace std;
 
 using Clause = vector<int>; // positive literal -> true, negative literal -> false
 using Formula = vector<Clause>;
-
-const int MAX_DEPTH = 3;
 
 /**
  * Propogate literal assignment to formula, returns new formula.
@@ -108,26 +107,33 @@ int chooseLiteral_parallel(const Formula &formula) {
 }
 
 /**
- * Structure for thread data
+ * Structure for thread‑pool thread data
+ *  - pool: the thread pool the worker belongs to
  *  - formula: the CNF formula
  *  - assignment: the literal assignments
  *  - result: satisfiability of the formula
+ *  - finished: signals that result has been written
  */
 struct DPLLThreadData {
+    ThreadPool pool;
     Formula formula;
     unordered_map<int, bool> assignment;
     bool result;
-    int depth;
+    atomic<bool> finished{false};
 };
 
-void* dpllThread(void* arg) {
-    DPLLThreadData* data = static_cast<DPLLThreadData*>(arg);
-    data->result = dpll_parallel(data->formula, data->assignment, data->depth);
+/**
+ * 
+ */
+static void* dpllTaskWrapper(void* arg) {
+    auto *d = static_cast<DPLLThreadData*>(arg);
+    d->result = dpll_parallel(d->formula, d->assignment, d->pool);
+    d->finished.store(true);
     return nullptr;
 }
 
 /**
- * Attempts to solve a SAT formula in CNF using fork–join parallelism with pthreads.
+ * Attempts to solve a SAT formula in CNF using fork–join parallelism.
  * 
  * Arguments:
  *  - formula: the CNF formula
@@ -135,7 +141,7 @@ void* dpllThread(void* arg) {
  * Returns:
  *  - true if satisfiable, false otherwise
  */
-bool dpll_parallel(Formula formula, unordered_map<int, bool> &assignment, int depth) {
+bool dpll_parallel(Formula formula, unordered_map<int, bool> &assignment, ThreadPool &pool) {
     // --- Unit Propagation ---
     int unitLiteral = findUnitClause_parallel(formula);
     while (unitLiteral != 0) {
@@ -170,97 +176,37 @@ bool dpll_parallel(Formula formula, unordered_map<int, bool> &assignment, int de
         }
     }
 
-    // --- Recursion using pthreads ---
-    int literal = chooseLiteral(formula);
+    int literal = chooseLiteral_parallel(formula);
 
-    // fall back to sequential algorithm if we have reached max recurse depth
-    if (depth >= MAX_DEPTH) {
-        // assign the literal to true
-        {
-            auto assignmentCopy = assignment;
-            Formula formulaCopy = propagateLiteral(literal, formula);
-            assignmentCopy[abs(literal)] = (literal > 0);
-            if (dpll(formulaCopy, assignmentCopy)) {
-                assignment = assignmentCopy;
-                return true;
-            }
-        }
-        // assign the literal to false
-        {
-            auto assignmentCopy = assignment;
-            Formula formulaCopy = propagateLiteral(-literal, formula);
-            assignmentCopy[abs(literal)] = !(literal > 0);
-            if (dpll(formulaCopy, assignmentCopy)) {
-                assignment = assignmentCopy;
-                return true;
-            }
-        }
+    // prepare positive branch
+    DPLLThreadData posData{ pool, formula, assignment, false };
+    posData.formula = propagateLiteral_parallel(literal, formula);
+    posData.assignment[abs(literal)] = (literal > 0);
+
+    // submit positive branch as a task
+    ThreadPoolTask posTask;
+    posTask.function = &dpllTaskWrapper;
+    posTask.arg = &posData;
+    threadPoolSubmit(&pool, posTask);
+
+    // do negative branch in this thread
+    unordered_map<int, bool> negAssign = assignment;
+    Formula negFormula = propagateLiteral_parallel(-literal, formula);
+    negAssign[abs(literal)] = !(literal > 0);
+    bool negResult = dpll_parallel(negFormula, negAssign, pool);
+
+    // wait for positive branch to finish
+    while (!posData.finished.load()) {
+        sched_yield();
     }
 
-    // data for thread with literal assignment true
-    DPLLThreadData* pos_data = new DPLLThreadData;
-    pos_data->formula = propagateLiteral_parallel(literal, formula);
-    pos_data->assignment = assignment;
-    pos_data->assignment[abs(literal)] = (literal > 0);
-    pos_data->depth = depth + 1;
-
-    // data for thread with literal assignment false
-    DPLLThreadData* neg_data = new DPLLThreadData;
-    neg_data->formula = propagateLiteral_parallel(-literal, formula);
-    neg_data->assignment = assignment;
-    neg_data->assignment[abs(literal)] = !(literal > 0);
-    neg_data->depth = depth + 1;
-
-    // spawn threads
-    pthread_t pos_thread, neg_thread;
-    int err;
-    err = pthread_create(&pos_thread, nullptr, dpllThread, static_cast<void*>(pos_data));
-    if(err) {
-        cerr << "Error creating thread!: " << err << endl;
+    if (posData.result) {
+        assignment = posData.assignment;
+        return true;
     }
-    err = pthread_create(&neg_thread, nullptr, dpllThread, static_cast<void*>(neg_data));
-    if(err) {
-        cerr << "Error creating thread!: " << err << endl;
+    if (negResult) {
+        assignment = negAssign;
+        return true;
     }
-
-    bool pos_done = false, neg_done = false;
-
-    // wait for threads to finish
-    while (!pos_done || !neg_done) {
-        if (!pos_done) {
-            if (pthread_tryjoin_np(pos_thread, nullptr) == 0) {
-                pos_done = true;
-
-                if (pos_data->result) {
-                    // solution found, cancel the other thread
-                    pthread_cancel(neg_thread);
-                    pthread_join(neg_thread, nullptr);
-                    assignment = pos_data->assignment;
-                    delete pos_data;
-                    delete neg_data;
-                    return true;
-                }
-            }
-        }
-        if (!neg_done) {
-            if (pthread_tryjoin_np(neg_thread, nullptr) == 0) {
-                neg_done = true;
-
-                if (neg_data->result) {
-                    // solution found, cancel the other thread
-                    pthread_cancel(pos_thread);
-                    pthread_join(pos_thread, nullptr);
-                    assignment = neg_data->assignment;
-                    delete pos_data;
-                    delete neg_data;
-                    return true;
-                }
-            }
-        }
-        // usleep(100);
-    }
-
-    delete pos_data;
-    delete neg_data;
     return false;
 }

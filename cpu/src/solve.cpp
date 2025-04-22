@@ -8,21 +8,29 @@
 #include <chrono>
 
 #include "sat.h"
+#include "pool.h"
 
 using namespace std;
 using namespace std::chrono;
 
 int main(int argc, char **argv) {
     bool parallel = false;
+    int numThreads = 0;
     int argIndex = 1;
     
     // usage: solver [-P] <benchmark_file_path>
     if (argc < 2) {
-        cerr << "Usage: " << argv[0] << " [-P] <benchmark_file_path>" << endl;
+        cerr << "Usage: " << argv[0] << " [-P <numThreads>] <benchmark_file_path>" << endl;
         return 1;
     }
     if (string(argv[argIndex]) == "-P") {
         parallel = true;
+        argIndex++;
+        if (argc <= argIndex) {
+            cerr << "Error: Number of threads missing after -P" << endl;
+            return 1;
+        }
+        numThreads = std::atoi(argv[argIndex]);
         argIndex++;
     }
     if (argc <= argIndex) {
@@ -66,6 +74,12 @@ int main(int argc, char **argv) {
     }
     infile.close();
 
+    // create thread pool
+    ThreadPool pool;
+    if (parallel) {
+        threadPoolInit(&pool, numThreads);
+    }
+
     unordered_map<int, bool> assignment;
 
     auto start = steady_clock::now();
@@ -73,7 +87,7 @@ int main(int argc, char **argv) {
     
     if (parallel) {
         cout << "Running parallel algorithm..." << endl;
-        result = dpll_parallel(formula, assignment, 0);
+        result = dpll_parallel(formula, assignment, pool);
     } else {
         cout << "Running sequential algorithm..." << endl;
         result = dpll(formula, assignment);
