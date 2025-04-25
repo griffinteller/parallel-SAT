@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 project(Terrain)
 
 set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -g -fsanitize=undefined -fno-omit-frame-pointer -pthread")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -pg -fsanitize=undefined -fno-omit-frame-pointer -pthread")
 
 include_directories(include)
 

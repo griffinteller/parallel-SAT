@@ -48,13 +48,22 @@ int main(int argc, char **argv) {
     // parse CNF file to generate formula
     Formula formula;
     string line;
+    int numLiterals, numClauses;
     bool pLineFound = false;
     while (getline(infile, line)) {
         if (line.empty() || line[0] == 'c') {
             continue;
         }
         if (line[0] == 'p') {
+            // p cnf <num literals> <num clauses>
+            istringstream pIss(line);
+            string p, cnf;
+            pIss >> p >> cnf >> numLiterals >> numClauses;
             pLineFound = true;
+            std::cerr
+                << "[parser] CNF header: "
+                << numLiterals << " literals, "
+                << numClauses  << " clauses\n";
             continue;
         }
         if (pLineFound) {
@@ -74,7 +83,7 @@ int main(int argc, char **argv) {
     }
     infile.close();
 
-    unordered_map<int, bool> assignment;
+    Assignment assignment(numLiterals + 1, litAssign::UNASSIGNED);
 
     auto start = steady_clock::now();
     bool result;
@@ -102,9 +111,11 @@ int main(int argc, char **argv) {
     cout << "The formula is " << (result ? "SATISFIABLE." : "UNSATISFIABLE.") << endl;
     if (result) {
         cout << "Satisfying assignment:" << endl;
-        for (const auto &entry : assignment) {
-            cout << "   Variable " << entry.first << " = " 
-                 << (entry.second ? "true" : "false") << endl;
+        for (int i = 0; i < numLiterals; i++) {
+            cout << "   Variable " << i << " = " 
+                 << ((assignment[i] == litAssign::TRUE) ? "true" : 
+                    (assignment[i]== litAssign::FALSE) ? "false" : 
+                                                        "unassigned") << endl;
         }
     }
 

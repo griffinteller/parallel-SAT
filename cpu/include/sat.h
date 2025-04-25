@@ -7,19 +7,30 @@
 
 using namespace std;
 
+enum litAssign {
+    UNASSIGNED  = 0,
+    TRUE        = 1,
+    FALSE       = 2,
+};
+
 using Clause = vector<int>; // positive literal -> true, negative literal -> false
 using Formula = vector<Clause>;
+using Assignment = vector<litAssign>;
 
 /**
- * Propogate literal assignment to formula, returns new formula.
+ * Check if the DPLL algorithm has finished. It is finished if:
+ *  1. there is a clause that evaluates to false (and all literals are assigned within the clause) or
+ *  2. all clauses evaluate to true
  * 
  * Arguments:
- *  - literal: the assigned literal
  *  - formula: the CNF formula
- * Returns: the new formula with literal assigned
+ *  - assignment: the literal assignment
+ *  - satisfied: the satisfiability of the CNF (if finished)
+ * Returns: whether the DPLL algorithm has terminated
  */
-Formula propagateLiteral(int literal, const Formula &formula);
-Formula propagateLiteral_parallel(int literal, const Formula &formula);
+bool dpllFinished(const Formula &formula, Assignment &assignment, bool* satisfied);
+bool dpllFinished_parallel(const Formula &formula, Assignment &assignment, bool* satisfied);
+
 
 /**
  * Returns the literal contained in the first unit clause found.
@@ -28,8 +39,8 @@ Formula propagateLiteral_parallel(int literal, const Formula &formula);
  *  - formula: the CNF formula
  * Returns: literal contained within unit clause, otherwise 0
  */
-int findUnitClause(const Formula &formula);
-int findUnitClause_parallel(const Formula &formula);
+int findUnitClause(const Formula &formula, Assignment &assignment);
+int findUnitClause_parallel(const Formula &formula, Assignment &assignment);
 
 /**
  * Returns the first pure literal if found.
@@ -38,19 +49,19 @@ int findUnitClause_parallel(const Formula &formula);
  *  - formula: the CNF formula
  * Returns: the pure literal if found, otherwise 0
  */
-int findPureLiteral(const Formula &formula);
-int findPureLiteral_parallel(const Formula &formula);
+int findPureLiteral(const Formula &formula, Assignment &assignment);
+int findPureLiteral_parallel(const Formula &formula, Assignment &assignment);
 
 /**
  * Choose a literal to assign within the formula.
- * Heuristic: select the first literal from the first non-empty clause.
+ * Heuristic: select the first literal from the first non-satisifed clause.
  * 
  * Arguments:
  *  - formula: the CNF formula
  * Returns: the literal to assign, otherwise 0
  */
-int chooseLiteral(const Formula &formula);
-int chooseLiteral_parallel(const Formula &formula);
+int chooseLiteral(const Formula &formula, Assignment &assignment);
+int chooseLiteral_parallel(const Formula &formula, Assignment &assignment);
 
 /**
  * Attempts to solve a SAT formula in CNF.
@@ -62,5 +73,5 @@ int chooseLiteral_parallel(const Formula &formula);
  *  - true if satisfiable, false otherwise
  *  - satisfying assignment, if found
  */
-bool dpll(Formula formula, unordered_map<int, bool> &assignment);
-bool dpll_parallel(Formula formula, unordered_map<int, bool> &assignment, ThreadPool &pool);
+bool dpll(Formula formula, Assignment &assignment);
+bool dpll_parallel(Formula formula, Assignment &assignment, ThreadPool &pool);
