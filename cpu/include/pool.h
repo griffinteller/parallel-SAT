@@ -23,6 +23,7 @@ struct ThreadPoolTask {
  *  - tasks: task FIFO
  *  - workers: worker thread pool
  *  - stop: reap condition
+ *  - workerCount: returns the number of worker threads
  */
 struct ThreadPool {
     pthread_mutex_t lock;
@@ -30,6 +31,10 @@ struct ThreadPool {
     queue<ThreadPoolTask> tasks;
     vector<pthread_t> workers;
     bool stop;
+    int activeTasks;
+    int queuedTasks;
+
+    size_t workerCount() const { return workers.size(); }
 };
 
 /**

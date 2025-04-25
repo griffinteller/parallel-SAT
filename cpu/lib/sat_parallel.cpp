@@ -9,6 +9,10 @@
 
 using namespace std;
 
+#pragma push_macro("cerr")
+#undef cerr
+#define cerr if (false) std::cerr
+
 using Clause = vector<int>; // positive literal -> true, negative literal -> false
 using Formula = vector<Clause>;
 
@@ -115,7 +119,7 @@ int chooseLiteral_parallel(const Formula &formula) {
  *  - finished: signals that result has been written
  */
 struct DPLLThreadData {
-    ThreadPool pool;
+    ThreadPool* pool;
     Formula formula;
     unordered_map<int, bool> assignment;
     bool result;
@@ -127,7 +131,7 @@ struct DPLLThreadData {
  */
 static void* dpllTaskWrapper(void* arg) {
     auto *d = static_cast<DPLLThreadData*>(arg);
-    d->result = dpll_parallel(d->formula, d->assignment, d->pool);
+    d->result = dpll_parallel(d->formula, d->assignment, *d->pool);
     d->finished.store(true);
     return nullptr;
 }
@@ -176,37 +180,83 @@ bool dpll_parallel(Formula formula, unordered_map<int, bool> &assignment, Thread
         }
     }
 
+    // choose literal to assign
     int literal = chooseLiteral_parallel(formula);
 
-    // prepare positive branch
-    DPLLThreadData posData{ pool, formula, assignment, false };
-    posData.formula = propagateLiteral_parallel(literal, formula);
-    posData.assignment[abs(literal)] = (literal > 0);
+    // check how many tasks are running
+    size_t queued = pool.queuedTasks;
+    size_t active = pool.activeTasks;
+    size_t workers = pool.workerCount();
 
-    // submit positive branch as a task
-    ThreadPoolTask posTask;
-    posTask.function = &dpllTaskWrapper;
-    posTask.arg = &posData;
-    threadPoolSubmit(&pool, posTask);
+    // if there is at least one worker free, spawn a task
+    if (queued + active < workers) {
+        // prepare positive branch
+        DPLLThreadData posData{ &pool, formula, assignment, false };
+        posData.formula = propagateLiteral_parallel(literal, formula);
+        posData.assignment[abs(literal)] = (literal > 0);
 
-    // do negative branch in this thread
-    unordered_map<int, bool> negAssign = assignment;
-    Formula negFormula = propagateLiteral_parallel(-literal, formula);
-    negAssign[abs(literal)] = !(literal > 0);
-    bool negResult = dpll_parallel(negFormula, negAssign, pool);
+        // submit positive branch as a task
+        ThreadPoolTask posTask;
+        posTask.function = &dpllTaskWrapper;
+        posTask.arg = &posData;
+        threadPoolSubmit(&pool, posTask);
+        cerr << "submitting task to the pool...\n";
 
-    // wait for positive branch to finish
-    while (!posData.finished.load()) {
-        sched_yield();
+        // do negative branch in this thread
+        unordered_map<int, bool> negAssign = assignment;
+        Formula negFormula = propagateLiteral_parallel(-literal, formula);
+        negAssign[abs(literal)] = !(literal > 0);
+        bool negResult = dpll_parallel(negFormula, negAssign, pool);
+
+        // wait for positive branch to finish
+        while (!posData.finished.load()) {
+            sched_yield();
+        }
+        cerr << "submitted task finished\n";
+
+        // check if positive branch succeeded
+        if (posData.result) {
+            assignment = posData.assignment;
+            return true;
+        }
+        // check if negative branch succeeded
+        if (negResult) {
+            assignment = negAssign;
+            return true;
+        }
+        return false;
     }
 
-    if (posData.result) {
-        assignment = posData.assignment;
-        return true;
+    // otherwise, do both tasks in this thread
+    else {
+        cerr << "running sequential fallback...\n";
+
+        // do positive branch
+        {
+            auto assignmentCopy = assignment;
+            Formula formulaCopy = propagateLiteral_parallel(literal, formula);
+            assignmentCopy[abs(literal)] = (literal > 0);
+            if (dpll_parallel(formulaCopy, assignmentCopy, pool)) {
+                assignment = assignmentCopy;
+                return true;
+                cerr << "sequential fallback finished\n";
+            }
+        }
+
+        // do negative branch
+        {
+            auto assignmentCopy = assignment;
+            Formula formulaCopy = propagateLiteral_parallel(-literal, formula);
+            assignmentCopy[abs(literal)] = !(literal > 0);
+            if (dpll_parallel(formulaCopy, assignmentCopy, pool)) {
+                assignment = assignmentCopy;
+                cerr << "sequential fallback finished\n";
+                return true;
+            }
+        }
+        cerr << "sequential fallback finished\n";
+        return false;
     }
-    if (negResult) {
-        assignment = negAssign;
-        return true;
-    }
-    return false;
 }
+
+#pragma pop_macro("cerr")

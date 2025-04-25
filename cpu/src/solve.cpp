@@ -18,7 +18,7 @@ int main(int argc, char **argv) {
     int numThreads = 0;
     int argIndex = 1;
     
-    // usage: solver [-P] <benchmark_file_path>
+    // usage: solver [-P <numThreads>] <benchmark_file_path>
     if (argc < 2) {
         cerr << "Usage: " << argv[0] << " [-P <numThreads>] <benchmark_file_path>" << endl;
         return 1;
@@ -74,20 +74,23 @@ int main(int argc, char **argv) {
     }
     infile.close();
 
-    // create thread pool
-    ThreadPool pool;
-    if (parallel) {
-        threadPoolInit(&pool, numThreads);
-    }
-
     unordered_map<int, bool> assignment;
 
     auto start = steady_clock::now();
     bool result;
     
     if (parallel) {
+        // create thread pool
+        ThreadPool pool;
+        if (parallel) {
+            threadPoolInit(&pool, numThreads);
+        }
+
         cout << "Running parallel algorithm..." << endl;
         result = dpll_parallel(formula, assignment, pool);
+
+        // reap worker threads
+        threadPoolDestroy(&pool);
     } else {
         cout << "Running sequential algorithm..." << endl;
         result = dpll(formula, assignment);
