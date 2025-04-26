@@ -20,36 +20,34 @@
     } \
 }
 
-struct Clause {
-    int count;
-    int* literals;
-};
-
 struct Formula {
     int numLiterals;
     int numClauses;
-    Clause* clauses;
+    int totalLiterals;
+    int* clauseCounts;
+    int* clauseStarts;
+    int* clauseLiterals;
 };
 
 struct CheckResult {
-    bool allClausesSatisfied;
-    bool anyClausesFalse;
+    int allClausesSatisfied;
+    int anyClausesFalse;
     
     // guaranteed to be valid if the above are both false
     int unassignedLiteral; 
 };
 
-enum AssignedValue {
+enum AssignedValue : int {
     UNASSIGNED = 0,
     TRUE,
     FALSE
 };
 
-constexpr int maxInstances = 256;
+constexpr int maxInstances = 512;
 constexpr int maxAssignments = 1 << 20;
 
 __constant__ Formula devFormula;
-__constant__ AssignedValue* instanceAssignments[maxInstances];
+__device__ AssignedValue* instanceAssignments[maxInstances];
 __device__ AssignedValue assignmentArena[maxAssignments];
 __device__ CheckResult checkResults[maxInstances];
 
@@ -82,20 +80,23 @@ __device__ void setAssig(volatile AssignedValue* assignment, int literal, Assign
 }
 
 // print formula on one line in () ^ () format, with assignment underneath
-__device__ void printFormula() {
+__device__ void printFormula(const volatile AssignedValue* assignment) {
     printf("Formula:\n");
     for (int i = 0; i < devFormula.numClauses; i++) {
-        const Clause& clause = devFormula.clauses[i];
+        const int clauseStart = devFormula.clauseStarts[i];
+        const int clauseCount = devFormula.clauseCounts[i];
+        const int* clause = devFormula.clauseLiterals + clauseStart;
         printf("(");
-        for (int j = 0; j < clause.count; j++) {
-            int literal = clause.literals[j];
-            AssignedValue value = getAssig(instanceAssignments[0], literal);
+        for (int j = 0; j < clauseCount; j++) {
+            int literal = clause[j];
+            AssignedValue value = getAssig(assignment, literal);
+            if (j > 0) printf(" v ");
             if (value == UNASSIGNED) {
-                printf("%d ", literal);
+                printf("%i ", literal);
             } else if (value == TRUE) {
-                printf("%d(T) ", literal);
+                printf("%i(T) ", literal);
             } else {
-                printf("%d(F) ", literal);
+                printf("%i(F) ", literal);
             }
         }
         printf(")\n");
@@ -104,121 +105,177 @@ __device__ void printFormula() {
 }
 
 
-// any propogated must be cleared to false
 __global__ void propagateAndCheck() {
+    volatile __shared__ int anyPropagated;
+    volatile __shared__ CheckResult result;
+
+    extern volatile __shared__ int sharedMem[];
+    volatile int* clauseLiterals = sharedMem;
+    volatile AssignedValue* assignment = 
+        (AssignedValue*)(clauseLiterals + devFormula.totalLiterals);
+
+    const int numClauses = devFormula.numClauses;
+
     int instance = blockIdx.x;
     int clauseIdx = threadIdx.x;
-    if (clauseIdx >= devFormula.numClauses) return;
+    if (clauseIdx >= numClauses) return;
 
-    const Clause& clause = devFormula.clauses[clauseIdx];
-    volatile AssignedValue* assignment = instanceAssignments[instance];
+    const int totalLiterals = devFormula.totalLiterals;
+    const int numLiterals = devFormula.numLiterals;
+    const int* clauseStarts = devFormula.clauseStarts;
+    const int* clauseCounts = devFormula.clauseCounts;
+    const int* devClauseLiterals = devFormula.clauseLiterals;
+    AssignedValue* devAssignment = instanceAssignments[instance];
 
-    __shared__ bool anyPropagated;
+    // setup
+
+    anyPropagated = 0;
+
+    for (int i = clauseIdx; i < totalLiterals; i += numClauses) {
+        clauseLiterals[i] = devClauseLiterals[i];
+    }
+
+    for (int i = clauseIdx; i < numLiterals; i += numClauses) {
+        assignment[i] = devAssignment[i];
+    }
+
+    const int clauseStart = clauseStarts[clauseIdx];
+    const int clauseCount = clauseCounts[clauseIdx];
+
+    // we can remove the volatile qualifier because we will no longer write here
+    const int* clause = const_cast<const int*>(clauseLiterals + clauseStart);
+
+    __syncthreads();
 
     // propagate unit cluases
-    bool clauseSatisfied = false;
+    int clauseSatisfied = 0;
     while (true) {
-        if (clauseIdx == 0) anyPropagated = false;
-        __syncthreads();
-
-        // if (clauseIdx == 0) {
-        //     printFormula();
-        //     printf("|--------:\n");
-        // }
-        // __syncthreads();
-
         if (!clauseSatisfied) {
             int numUnassigned = 0;
             int lastUnassigned;
-            for (int i = 0; i < clause.count; i++) {
-                int literal = clause.literals[i];
+            for (int i = 0; i < clauseCount; i++) {
+                int literal = clause[i];
                 AssignedValue value = getAssig(assignment, literal);
 
                 if (value == TRUE) {
-                    clauseSatisfied = true;
+                    clauseSatisfied = 1;
                     break;
                 }
                 if (value == UNASSIGNED) {
                     numUnassigned++;
-                    lastUnassigned = clause.literals[i];
+                    lastUnassigned = clause[i];
                     if (numUnassigned > 1) break;
                 }
             }
 
             if (!clauseSatisfied && numUnassigned == 1) {
                 setAssig(assignment, lastUnassigned, TRUE);
-                anyPropagated = true;
+                anyPropagated = 1;
             }
         }
         
         __syncthreads();
+
+        // printf("anyPropagated End: %i\n", anyPropagated);
         if (!anyPropagated) break;
+        if (clauseIdx == 0) anyPropagated = 0;
+
+        __syncthreads();
     }
 
     // get clause result
-    bool clauseFalse = true;
-    bool foundUnassigned = false;
-    int unassignedLiteral;
-    for (int i = 0; i < clause.count; i++) {
-        int literal = clause.literals[i];
+    int clauseFalse = 1;
+    int foundUnassigned = 0;
+    int unassignedLiteral = -2;
+    for (int i = 0; i < clauseCount; i++) {
+        int literal = clause[i];
         AssignedValue value = getAssig(assignment, literal);
 
         if (value == TRUE) {
-            clauseSatisfied = true;
-            clauseFalse = false;
+            clauseSatisfied = 1;
+            clauseFalse = 0;
             break;
         }
 
         if (value == UNASSIGNED) {
-            clauseFalse = false;
-            foundUnassigned = true;
+            clauseFalse = 0;
+            foundUnassigned = 1;
             unassignedLiteral = abs(literal);
             break;
         }
     }
 
-    // printf("Clause False: %i, Clause Satisfied: %i, Found Unassigned: %i, Unassigned Literal: %i\n",
-    //        clauseFalse, clauseSatisfied, foundUnassigned, unassignedLiteral);
-
+    // printf("Clause False: %i, Clause Satisfied: %i, Found Unassigned: %i, Unassigned Literal: %i Clause Start: %i Clause Count: %i\n",
+    //        clauseFalse, clauseSatisfied, foundUnassigned, devClauseLiterals[clauseStart], clauseStart, clauseCount);
+    
     if (clauseIdx == 0) {
         // first clause in block, initialize result
-        checkResults[instance].allClausesSatisfied = clauseSatisfied;
-        checkResults[instance].anyClausesFalse = clauseFalse;
-        checkResults[instance].unassignedLiteral = 
+        result.allClausesSatisfied = clauseSatisfied;
+        result.anyClausesFalse = clauseFalse;
+        result.unassignedLiteral = 
             foundUnassigned ? unassignedLiteral : -1;
     }
+
     __syncthreads();
 
-    if (clauseIdx == 0) return;
+    if (clauseIdx > 0) {
+        // atomics not needed,
+        // incoherence between threads doesn't affect correctness here
+        // if (clauseFalse) atomicCAS((int*)&result.anyClausesFalse, 0, 1);
+        // if (!clauseSatisfied) atomicCAS((int*)&result.allClausesSatisfied, 1, 0);
+        // if (foundUnassigned) atomicCAS((int*)&result.unassignedLiteral, -1, unassignedLiteral);
+        if (clauseFalse) result.anyClausesFalse = 1;
+        if (!clauseSatisfied) result.allClausesSatisfied = 0;
+        if (foundUnassigned) result.unassignedLiteral = unassignedLiteral;
+    }
 
-    // atomics not needed,
-    // incoherence between threads doesn't affect correctness here
-    CheckResult& result = checkResults[instance];
-    if (clauseFalse) result.anyClausesFalse = true;
-    if (!clauseSatisfied) result.allClausesSatisfied = false;
-    if (foundUnassigned) result.unassignedLiteral = unassignedLiteral;
-    // (creates a ton of unnecessary traffic, anything we can do about this?)
+    __syncthreads();
+
+    // if (instance == 0) {
+        // if (result.allClausesSatisfied) {
+        //     printf("Instance: %i Clause %i: allClausesSatisfied: %i, anyClausesFalse: %i, unassignedLiteral: %i\n",
+        //         instance, clauseIdx, result.allClausesSatisfied, result.anyClausesFalse, result.unassignedLiteral);
+        // }
+    // }
+    
+    if (clauseIdx == 0) {
+        // complier is unhappy if we copy the whole struct
+        checkResults[instance].allClausesSatisfied = result.allClausesSatisfied;
+        checkResults[instance].anyClausesFalse = result.anyClausesFalse;
+        checkResults[instance].unassignedLiteral = result.unassignedLiteral;
+    }
+
+    // copy assignment back to global memory
+    for (int i = clauseIdx; i < numLiterals; i += numClauses) {
+        devAssignment[i] = assignment[i];
+    }
 }
 
 void setupGlobals(const Formula& formula) {
     hostFormula = formula;
 
     // copy formula to device
-    Clause* clauses;
-    CC(cudaMalloc(&clauses, sizeof(Clause) * formula.numClauses));
-    for (int i = 0; i < formula.numClauses; i++) {
-        CC(cudaMemcpy(&clauses[i].count, &formula.clauses[i].count, sizeof(int), cudaMemcpyHostToDevice));
+    int* clauseStarts;
+    int* clauseCounts;
+    int* clauseLiterals;
+    CC(cudaMalloc(&clauseStarts, sizeof(int) * formula.numClauses));
+    CC(cudaMalloc(&clauseCounts, sizeof(int) * formula.numClauses));
+    CC(cudaMalloc(&clauseLiterals, sizeof(int) * formula.totalLiterals));
 
-        int* literals;
-        CC(cudaMalloc(&literals, sizeof(int) * formula.clauses[i].count));
-        CC(cudaMemcpy(literals, formula.clauses[i].literals, sizeof(int) * formula.clauses[i].count, cudaMemcpyHostToDevice));
-        CC(cudaMemcpy(&clauses[i].literals, &literals, sizeof(int*), cudaMemcpyHostToDevice));
-    }
+    CC(cudaMemcpy(clauseStarts, formula.clauseStarts, 
+                  sizeof(int) * formula.numClauses, cudaMemcpyHostToDevice));
+    CC(cudaMemcpy(clauseCounts, formula.clauseCounts,
+                  sizeof(int) * formula.numClauses, cudaMemcpyHostToDevice));
+    CC(cudaMemcpy(clauseLiterals, formula.clauseLiterals,
+                  sizeof(int) * formula.totalLiterals, cudaMemcpyHostToDevice));
 
     Formula copy = {
         .numLiterals = formula.numLiterals,
         .numClauses = formula.numClauses,
-        .clauses = clauses
+        .totalLiterals = formula.totalLiterals,
+        .clauseCounts = clauseCounts,
+        .clauseStarts = clauseStarts,
+        .clauseLiterals = clauseLiterals
     };
     CC(cudaMemcpyToSymbol(devFormula, &copy, sizeof(Formula)));
 
@@ -265,12 +322,15 @@ bool dpllMain() {
     // print formula
     // std::cout << "Formula:" << std::endl;
     // for (int i = 0; i < hostFormula.numClauses; i++) {
-    //     const Clause& clause = hostFormula.clauses[i];
-    //     std::cout << "Clause " << i << ": ";
-    //     for (int j = 0; j < clause.count; j++) {
-    //         std::cout << clause.literals[j] << " ";
+    //     const int clauseStart = hostFormula.clauseStarts[i];
+    //     const int clauseCount = hostFormula.clauseCounts[i];
+    //     const int* clause = hostFormula.clauseLiterals + clauseStart;
+    //     std::cout << "(";
+    //     for (int j = 0; j < clauseCount; j++) {
+    //         int literal = clause[j];
+    //         std::cout << literal << " ";
     //     }
-    //     std::cout << std::endl;
+    //     std::cout << ")" << std::endl;
     // }
     // std::cout << std::endl;
 
@@ -301,7 +361,10 @@ bool dpllMain() {
 
         // std::cout << "Propagating and checking" << std::endl;
         int numClausesCeil32 = ((hostFormula.numClauses - 1) / 32 + 1) * 32;
-        propagateAndCheck<<<activeInstances, numClausesCeil32>>>();
+        int sharedMemSize = sizeof(int) * hostFormula.totalLiterals +
+            sizeof(AssignedValue) * hostFormula.numLiterals;
+        // std::cout << "Shared memory alloc: " << sharedMemSize << std::endl;
+        propagateAndCheck<<<activeInstances, numClausesCeil32, sharedMemSize>>>();
 
         CC(cudaMemcpyFromSymbol(
             results, checkResults, 
@@ -400,10 +463,14 @@ int main(int argc, char** argv) {
     }
 
     // parse CNF file to generate formula
-    std::vector<Clause> clauses;
+    std::vector<int> clauseCounts;
+    std::vector<int> clauseStarts;
+    std::vector<int> clauseLiterals;
+
     std::string line;
     bool pLineFound = false;
     int numLiterals;
+    int totalLiterals = 0;
     while (std::getline(infile, line)) {
         if (line.empty() || line[0] == 'c') {
             continue;
@@ -419,34 +486,34 @@ int main(int argc, char** argv) {
         if (pLineFound) {
             std::istringstream iss(line);
             int lit;
-            std::vector<int> clause;
+            clauseStarts.push_back(clauseLiterals.size());
             while (iss >> lit) {
                 if (lit == 0) {
                     break;
                 }
-                clause.push_back(lit);
+                clauseLiterals.push_back(lit);
             }
-            if (!clause.empty()) {
-                Clause c;
-                c.count = clause.size();
-                c.literals = new int[c.count];
-                for (int i = 0; i < c.count; i++) {
-                    c.literals[i] = clause[i];
-                }
-                clauses.push_back(c);
+            if (clauseStarts.back() == clauseLiterals.size()) {
+                // clause is empty
+                clauseStarts.pop_back();
+            } else {
+                int count = clauseLiterals.size() - clauseStarts.back();
+                clauseCounts.push_back(count);
+                totalLiterals += count;
             }
         }
     }
     infile.close();
 
+    assert(clauseCounts.size() == clauseStarts.size());
+
     Formula formula;
     formula.numLiterals = numLiterals;
-    formula.numClauses = clauses.size();
-    formula.clauses = new Clause[formula.numClauses];
-    for (size_t i = 0; i < clauses.size(); i++) {
-        formula.clauses[i].count = clauses[i].count;
-        formula.clauses[i].literals = clauses[i].literals;
-    }
+    formula.numClauses = clauseCounts.size();
+    formula.totalLiterals = totalLiterals;
+    formula.clauseCounts = clauseCounts.data();
+    formula.clauseStarts = clauseStarts.data();
+    formula.clauseLiterals = clauseLiterals.data();
 
     bool sat = dpll(formula);
     if (sat) {
