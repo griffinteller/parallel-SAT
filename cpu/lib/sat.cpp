@@ -197,7 +197,7 @@ int chooseLiteral(const Formula &formula, Assignment &assignment) {
  *  - true if satisfiable, false otherwise
  *  - satisfying assignment, if found
  */
-bool dpll(Formula formula, Assignment &assignment) {
+bool dpll(const Formula &formula, Assignment &assignment) {
     // --- Unit Propagation ---
     int unitLiteral = findUnitClause(formula, assignment);
     while (unitLiteral != 0) {
@@ -226,22 +226,16 @@ bool dpll(Formula formula, Assignment &assignment) {
     int literal = chooseLiteral(formula, assignment);
 
     // assign the literal to true
-    {
-        auto assignmentCopy = assignment;
-        assignmentCopy[abs(literal)] = (literal > 0) ? litAssign::TRUE : litAssign::FALSE;
-        if (dpll(formula, assignmentCopy)) {
-            assignment = assignmentCopy;
-            return true;
-        }
+    auto assignmentCopy = assignment;
+    assignmentCopy[abs(literal)] = (literal > 0) ? litAssign::TRUE : litAssign::FALSE;
+    if (dpll(formula, assignmentCopy)) {
+        assignment = assignmentCopy;
+        return true;
     }
     // assign the literal to false
-    {
-        auto assignmentCopy = assignment;
-        assignmentCopy[abs(literal)] = !(literal > 0) ? litAssign::TRUE : litAssign::FALSE;
-        if (dpll(formula, assignmentCopy)) {
-            assignment = assignmentCopy;
-            return true;
-        }
+    assignment[abs(literal)] = !(literal > 0) ? litAssign::TRUE : litAssign::FALSE;
+    if (dpll(formula, assignment)) {
+        return true;
     }
     return false;
 }

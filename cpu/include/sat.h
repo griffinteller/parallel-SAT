@@ -73,5 +73,5 @@ int chooseLiteral_parallel(const Formula &formula, Assignment &assignment);
  *  - true if satisfiable, false otherwise
  *  - satisfying assignment, if found
  */
-bool dpll(Formula formula, Assignment &assignment);
-bool dpll_parallel(Formula formula, Assignment &assignment, ThreadPool &pool);
+bool dpll(const Formula &formula, Assignment &assignment);
+bool dpll_parallel(const Formula &formula, Assignment &assignment, ThreadPool &pool);
