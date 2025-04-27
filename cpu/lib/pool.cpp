@@ -19,6 +19,7 @@ inline auto now() { return std::chrono::high_resolution_clock::now(); }
  */
 void* threadPoolWorker(void* arg) {
     ThreadPool* pool = static_cast<ThreadPool*>(arg);
+    cerr << "[worker " << pthread_self() << "] started" << endl;
 
     while (true) {
         // acquire thread pool lock
@@ -31,28 +32,36 @@ void* threadPoolWorker(void* arg) {
         );
 
         // wait for work to appear
-        while (pool->count == 0 && !pool->stop) {
+        while (pool->tasks.empty() && !pool->stop) {
             pthread_cond_wait(&pool->cond, &pool->lock);
         }
 
         // return if the pool is stopped
-        if (pool->count == 0 && pool->stop) {
+        if (pool->tasks.empty() && pool->stop) {
             pthread_mutex_unlock(&pool->lock);
             break;
         }
 
+        cerr << "[worker " << pthread_self() << "] waking up, queue size " 
+          << pool->tasks.size() << endl;
+
         // take work
-        ThreadPoolTask task = pool->tasksBuffer[pool->head];
-        pool->head = (pool->head + 1) % pool->capacity;
-        pool->count--;
+        ThreadPoolTask task = pool->tasks.back();
+        pool->tasks.pop_back();
         pool->queuedTasks--;
         pool->activeTasks++;
 
+        cerr << "[worker " << pthread_self() << "] popped task, queue size now " 
+          << pool->tasks.size() << endl;
+
         // release thread pool lock
         pthread_mutex_unlock(&pool->lock);
+        pthread_cond_signal(&pool->cond);
 
         // execute function
         task.function(task.arg);
+
+        cerr << "[worker " << pthread_self() << "] finished task" << endl;
 
         pthread_mutex_lock(&pool->lock);
         pool->activeTasks--;
@@ -76,13 +85,8 @@ void threadPoolInit(ThreadPool* pool, int numWorkers) {
     pthread_mutex_init(&pool->lock, nullptr);
     pthread_cond_init(&pool->cond, nullptr);
 
-    pool->capacity = numWorkers;
-    pool->tasksBuffer = (ThreadPoolTask*)malloc(
-        pool->capacity * sizeof(ThreadPoolTask)
-    );
-    pool->head = pool->tail = pool->count = 0;
-
     for (int i = 0; i < numWorkers; i++) {
+        cerr << "[pool] created worker tid: " << i << endl;
         pthread_t thread;
         pthread_create(&thread, nullptr, threadPoolWorker, pool);
         pool->workers.push_back(thread);
@@ -99,19 +103,14 @@ void threadPoolSubmit(ThreadPool* pool, ThreadPoolTask task) {
     // acquire thread pool lock
     pthread_mutex_lock(&pool->lock);
 
-    while (pool->count == pool->capacity && !pool->stop) {
-        pthread_cond_wait(&pool->cond, &pool->lock);
-    }
-
-    // push onto work queue
-    pool->tasksBuffer[pool->tail] = task;
-    pool->tail = (pool->tail + 1) % pool->capacity;
-    pool->count++;
+    // push task onto stack
+    pool->tasks.push_back(task);
     pool->queuedTasks++;
 
-    // wake up worker thread
     pthread_mutex_unlock(&pool->lock);
     pthread_cond_signal(&pool->cond);
+
+    cerr << "[submit] pushing task, queue size now " << pool->tasks.size() << endl;
 }
 
 /**
@@ -135,7 +134,6 @@ void threadPoolDestroy(ThreadPool* pool) {
         pthread_join(t, nullptr);
     }
 
-    free(pool->tasksBuffer);
     pthread_mutex_destroy(&pool->lock);
     pthread_cond_destroy(&pool->cond);
 }

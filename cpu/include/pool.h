@@ -36,11 +36,7 @@ struct ThreadPool {
     size_t          activeTasks;
     vector<pthread_t> workers;
 
-    ThreadPoolTask* tasksBuffer;
-    size_t          capacity;
-    size_t          head;
-    size_t          tail;
-    size_t          count;
+    deque<ThreadPoolTask> tasks;
 
     size_t workerCount() const { return workers.size(); }
 };

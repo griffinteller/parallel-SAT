@@ -3,6 +3,8 @@
 #include <vector>
 #include <unordered_map>
 #include <atomic>
+#include <mutex>
+#include <condition_variable>
 
 #include "pool.h"
 
@@ -19,6 +21,11 @@ using Formula = vector<Clause>;
 using Assignment = vector<litAssign>;
 
 extern atomic<long long> totalUnitNs, totalPureNs, totalCopyNs, totalSubmitNs, totalSpinNs, totalWorkNs;
+
+extern atomic<bool> foundSat;
+extern atomic<int> tasksInFlight;
+extern mutex satMutex;
+extern condition_variable satCv;
 
 /**
  * Check if the DPLL algorithm has finished. It is finished if:
@@ -77,4 +84,5 @@ int chooseLiteral_parallel(const Formula &formula, Assignment &assignment);
  *  - satisfying assignment, if found
  */
 bool dpll(const Formula &formula, Assignment &assignment);
-bool dpll_parallel(const Formula &formula, Assignment &assignment, ThreadPool &pool, int depth);
+bool dpll_parallel(const Formula &formula, Assignment &assignment, int numThreads);
+void dpll_spawn(const Formula &formula, Assignment &assignment, ThreadPool &pool);

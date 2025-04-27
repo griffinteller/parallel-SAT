@@ -89,21 +89,12 @@ int main(int argc, char **argv) {
     duration<double> elapsed;
     
     if (parallel) {
-        // create thread pool
-        ThreadPool pool;
-        if (parallel) {
-            threadPoolInit(&pool, numThreads);
-        }
-
         cout << "Running parallel algorithm..." << endl;
 
         auto start = steady_clock::now();
-        result = dpll_parallel(formula, assignment, pool, 0);
+        result = dpll_parallel(formula, assignment, numThreads);
         auto end = steady_clock::now();
         elapsed = end - start;
-
-        // reap worker threads
-        threadPoolDestroy(&pool);
 
         double unitMs   = totalUnitNs.load()   * 1e-6;
         double pureMs   = totalPureNs.load()   * 1e-6;
@@ -130,15 +121,15 @@ int main(int argc, char **argv) {
     }
 
     cout << "The formula is " << (result ? "SATISFIABLE." : "UNSATISFIABLE.") << endl;
-    if (result) {
-        cout << "Satisfying assignment:" << endl;
-        for (int i = 0; i < numLiterals; i++) {
-            cout << "   Variable " << i << " = " 
-                 << ((assignment[i] == litAssign::TRUE) ? "true" : 
-                    (assignment[i]== litAssign::FALSE) ? "false" : 
-                                                        "unassigned") << endl;
-        }
-    }
+    // if (result) {
+    //     cout << "Satisfying assignment:" << endl;
+    //     for (int i = 0; i < numLiterals; i++) {
+    //         cout << "   Variable " << i << " = " 
+    //              << ((assignment[i] == litAssign::TRUE) ? "true" : 
+    //                 (assignment[i]== litAssign::FALSE) ? "false" : 
+    //                                                     "unassigned") << endl;
+    //     }
+    // }
 
     bool expected;
     if (file_path.find("uuf") != string::npos) {

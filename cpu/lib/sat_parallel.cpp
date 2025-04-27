@@ -8,6 +8,8 @@
 #include <unistd.h>
 #include <chrono>
 #include <atomic>
+#include <mutex>
+#include <condition_variable>
 
 
 using namespace std;
@@ -24,6 +26,12 @@ int MAX_DEPTH = 100000;
 
 atomic<long long> totalUnitNs{0}, totalPureNs{0}, totalCopyNs{0}, totalSubmitNs{0}, totalSpinNs{0}, totalWorkNs;
 inline auto now() { return std::chrono::high_resolution_clock::now(); }
+
+atomic<bool> foundSat{false};
+atomic<int> tasksInFlight{0};
+mutex satMutex;
+condition_variable satCv;
+Assignment sat_assignment;
 
 /**
  * Check if the DPLL algorithm has finished. It is finished if:
@@ -219,7 +227,6 @@ struct DPLLThreadData {
     ThreadPool* pool;
     const Formula &formula;
     Assignment* assignment;
-    int depth;
     bool result;
     atomic<bool> finished{false};
 };
@@ -229,10 +236,118 @@ struct DPLLThreadData {
  */
 static void* dpllTaskWrapper(void* arg) {
     auto *d = static_cast<DPLLThreadData*>(arg);
-    d->result = dpll_parallel(d->formula, *d->assignment, *d->pool, d->depth);
+    dpll_spawn(d->formula, *d->assignment, *d->pool);
     d->finished.store(true, memory_order_release);
-    atomic_notify_one(&d->finished);
+    if (tasksInFlight.fetch_sub(1, memory_order_acq_rel) == 1) {
+        sat_assignment = *(d->assignment);
+        satCv.notify_all();
+    }
+    delete d->assignment;
+    delete d;
     return nullptr;
+}
+
+void submitTask(ThreadPool &pool, ThreadPoolTask t) {
+    tasksInFlight.fetch_add(1, memory_order_relaxed);
+    threadPoolSubmit(&pool, t);
+}
+
+void dpll_spawn(const Formula &formula, Assignment &assignment, ThreadPool &pool) {
+    // bail if SAT already found
+    if (foundSat.load(std::memory_order_relaxed)) return;
+
+    // --- Stopping Condition ---
+    bool satisfied;
+    if (dpllFinished_parallel(formula, assignment, &satisfied)) {
+        if (satisfied) {
+            foundSat.store(true, std::memory_order_relaxed);
+            satCv.notify_all();
+            cerr << "statisfied!" << endl;
+        }
+        cerr << "finished!" << endl;
+        return;
+    }
+
+    cerr << "forking..." << endl;
+
+    // --- Unit Propagation ---
+    auto u0 = now();
+    int unitLiteral = findUnitClause_parallel(formula, assignment);
+    while (unitLiteral != 0) {
+        // assign literal
+        assignment[abs(unitLiteral)] = (unitLiteral > 0) ? litAssign::TRUE : litAssign::FALSE;
+        
+        unitLiteral = findUnitClause_parallel(formula, assignment);
+    }
+    auto u1 = now();
+    totalUnitNs.fetch_add(
+    std::chrono::duration_cast<std::chrono::nanoseconds>(u1 - u0).count(),
+    std::memory_order_relaxed
+    );
+
+    // --- Pure Literal Elimination ---
+    auto p0 = now();
+    int pureLiteral = findPureLiteral_parallel(formula, assignment);
+    while (pureLiteral != 0) {
+        // assign literal
+        assignment[abs(pureLiteral)] = (pureLiteral > 0) ? litAssign::TRUE : litAssign::FALSE;
+
+        pureLiteral = findPureLiteral_parallel(formula, assignment);
+    }
+    auto p1 = now();
+    totalPureNs.fetch_add(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(p1 - p0).count(),
+        std::memory_order_relaxed
+    );
+
+    // choose literal to assign
+    int literal = chooseLiteral_parallel(formula, assignment);
+
+    // prepare positive branch
+    auto tcp0 = now();
+    auto *assignmentPos = new Assignment(assignment);
+    auto tcp1 = now();
+    totalCopyNs.fetch_add(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(tcp1 - tcp0).count(),
+        std::memory_order_relaxed
+        );
+
+    (*assignmentPos)[abs(literal)] = (literal > 0) ? litAssign::TRUE : litAssign::FALSE;
+    auto *posData = new DPLLThreadData{ &pool, formula, assignmentPos, false };
+
+    // submit positive branch as a task
+    ThreadPoolTask posTask{ &dpllTaskWrapper, posData };
+    auto sp0 = now();
+    submitTask(pool, posTask);
+    auto sp1 = now();
+    totalSubmitNs.fetch_add(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(sp1 - sp0).count(),
+        std::memory_order_relaxed
+    );
+
+    // prepare negative branch
+    auto tcn0 = now();
+    auto *assignmentNeg = new Assignment(assignment);
+    auto tcn1 = now();
+    totalCopyNs.fetch_add(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(tcn1 - tcn0).count(),
+        std::memory_order_relaxed
+    );
+
+    (*assignmentNeg)[abs(literal)] = !(literal > 0) ? litAssign::TRUE : litAssign::FALSE;
+    auto *negData = new DPLLThreadData{ &pool, formula, assignmentNeg, false };
+
+    // submit negative branch as a task
+    ThreadPoolTask negTask{ &dpllTaskWrapper, negData };
+    auto sn0 = now();
+    submitTask(pool, negTask);
+    auto sn1 = now();
+    totalSubmitNs.fetch_add(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(sn1 - sn0).count(),
+        std::memory_order_relaxed
+    );
+
+    return;
 }
 
 /**
@@ -244,208 +359,32 @@ static void* dpllTaskWrapper(void* arg) {
  * Returns:
  *  - true if satisfiable, false otherwise
  */
-bool dpll_parallel(const Formula &formula, Assignment &assignment, ThreadPool &pool, int depth) {
-    /* TODO: I tried disabling the unit clause elimination and pure literal elimination
-            after noticing that the unit clause + pure times scale super-linearly
-            relative to the number of threads.
-    */
+bool dpll_parallel(const Formula &formula, Assignment &assignment, int numThreads) {
+    bool sat = false;
 
-    if (depth < MAX_DEPTH) {
-        // --- Unit Propagation ---
-        auto u0 = now();
-        int unitLiteral = findUnitClause_parallel(formula, assignment);
-        while (unitLiteral != 0) {
-            // assign literal
-            assignment[abs(unitLiteral)] = (unitLiteral > 0) ? litAssign::TRUE : litAssign::FALSE;
-            
-            unitLiteral = findUnitClause(formula, assignment);
-        }
-        auto u1 = now();
-        totalUnitNs.fetch_add(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(u1 - u0).count(),
-        std::memory_order_relaxed
-        );
+    // create thread pool
+    ThreadPool pool;
+    threadPoolInit(&pool, numThreads);
 
-        // --- Pure Literal Elimination ---
-        auto p0 = now();
-        int pureLiteral = findPureLiteral(formula, assignment);
-        while (pureLiteral != 0) {
-            // assign literal
-            assignment[abs(pureLiteral)] = (pureLiteral > 0) ? litAssign::TRUE : litAssign::FALSE;
+    // submit the first task
+    auto *rootData = new DPLLThreadData{ &pool, formula, new Assignment(assignment), false };
+    submitTask(pool, ThreadPoolTask{ &dpllTaskWrapper, rootData });
 
-            pureLiteral = findPureLiteral(formula, assignment);
-        }
-        auto p1 = now();
-        totalPureNs.fetch_add(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(p1 - p0).count(),
-            std::memory_order_relaxed
-        );
+    // wait for signal that worker found SAT or search space exhausted
+    unique_lock<mutex> lk(satMutex);
+    satCv.wait(lk, []{ 
+        return foundSat.load(memory_order_relaxed)
+            || tasksInFlight.load(std::memory_order_relaxed) == 0; 
+    });
+    if (foundSat.load()) {
+        assignment = sat_assignment;
+        sat = true;
     }
 
-    // --- Stopping Condition ---
-    bool satisfied;
-    if (dpllFinished(formula, assignment, &satisfied)) {
-        return satisfied;
-    }
+    // clean up thread pool
+    threadPoolDestroy(&pool);
 
-    // choose literal to assign
-    int literal = chooseLiteral_parallel(formula, assignment);
-
-    // check how many tasks are running
-    size_t queued = pool.queuedTasks;
-    size_t active = pool.activeTasks;
-    size_t workers = pool.workerCount();
-
-    // if there is at least one worker free, spawn a task
-    if (depth > MIN_DEPTH && queued + active < workers) {
-        // prepare positive branch
-        auto tcp0 = now();
-        auto *assignmentCopy = new Assignment(assignment);
-        auto tcp1 = now();
-        totalCopyNs.fetch_add(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(tcp1 - tcp0).count(),
-            std::memory_order_relaxed
-          );
-
-        (*assignmentCopy)[abs(literal)] = (literal > 0) ? litAssign::TRUE : litAssign::FALSE;
-        auto *posData = new DPLLThreadData{ &pool, formula, assignmentCopy, depth++, false };
-
-        // submit positive branch as a task
-        ThreadPoolTask posTask{ &dpllTaskWrapper, posData };
-        auto s0 = now();
-        threadPoolSubmit(&pool, posTask);
-        auto s1 = now();
-        totalSubmitNs.fetch_add(
-          std::chrono::duration_cast<std::chrono::nanoseconds>(s1 - s0).count(),
-          std::memory_order_relaxed
-        );
-
-        // do negative branch in this thread
-        assignment[abs(literal)] = !(literal > 0) ? litAssign::TRUE : litAssign::FALSE;
-        auto tn0 = now();
-        bool negResult = dpll_parallel(formula, assignment, pool, depth++);
-        auto tn1 = now();
-        totalWorkNs.fetch_add(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(tn1 - tn1).count(),
-            std::memory_order_relaxed
-          );
-
-        // check if negative branch succeeded
-        if (negResult) {
-            return true;
-        }
-
-        // wait for positive branch to finish
-        auto w0 = now();
-        posData->finished.wait(false, memory_order_acquire);
-
-        /* TODO: the below could help performance in theory?
-            instead of idle waiting for the spawned task to finish,
-            we could instead try to grab work from the queue and do it ourself
-        */
-
-        // while (true) {
-        //     auto expected = false;
-        //     if (posData->finished.load()) break;
-        //     usleep(100);
-          
-        //     ThreadPoolTask task;
-        //     bool haveWork = false;
-        //     pthread_mutex_lock(&pool.lock);
-        //     if (pool.count > 0) {
-        //         task = pool.tasksBuffer[pool.head];
-        //         pool.head = (pool.head + 1) % pool.capacity;
-        //         pool.count--;
-        //         pool.activeTasks++;
-        //         haveWork = true;
-        //     }
-        //     pthread_mutex_unlock(&pool.lock);
-        
-        //     if (haveWork) {
-        //         task.function(task.arg);
-        //         pthread_mutex_lock(&pool.lock);
-        //         pool.activeTasks--;
-        //         pthread_mutex_unlock(&pool.lock);
-        //     }
-        // }
-
-        auto w1 = now();
-        totalSpinNs.fetch_add(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(w1 - w0).count(),
-            std::memory_order_relaxed
-          );
-        cerr << "submitted task finished\n";
-
-        // check if positive branch succeeded
-        if (posData->result) {
-            assignment = *(posData->assignment);
-            delete posData->assignment;
-            delete posData;
-            return true;
-        }
-        delete posData->assignment;
-        delete posData;
-
-        return false;
-    }
-
-    // otherwise, do both tasks in this thread
-    else {
-        cerr << "running sequential fallback...\n";
-
-        // assign the literal to true
-        auto c0 = now();
-        auto *assignmentCopy = new Assignment(assignment);
-        auto c1 = now();
-        totalCopyNs.fetch_add(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(c1 - c0).count(),
-            std::memory_order_relaxed
-          );
-
-        
-        (*assignmentCopy)[abs(literal)] = (literal > 0) ? litAssign::TRUE : litAssign::FALSE;
-
-        auto n0 = now();
-        if (dpll_parallel(formula, *assignmentCopy, pool, depth++)) {
-            auto n1 = now();
-            totalWorkNs.fetch_add(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(n1 - n0).count(),
-                std::memory_order_relaxed
-              );
-
-            assignment = *assignmentCopy;
-            cerr << "sequential fallback finished\n";
-            return true;
-        }
-        auto n1 = now();
-        totalWorkNs.fetch_add(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(n1 - n0).count(),
-            std::memory_order_relaxed
-          );
-
-        // assign the literal to false
-        assignment[abs(literal)] = !(literal > 0) ? litAssign::TRUE : litAssign::FALSE;
-
-        auto p0 = now();
-        if (dpll_parallel(formula, assignment, pool, depth++)) {
-            auto p1 = now();
-            totalWorkNs.fetch_add(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(p1 - p0).count(),
-                std::memory_order_relaxed
-              );
-
-            cerr << "sequential fallback finished\n";
-            return true;
-        }
-        auto p1 = now();
-        totalWorkNs.fetch_add(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(p1 - p0).count(),
-            std::memory_order_relaxed
-          );
-
-        cerr << "sequential fallback finished\n";
-        return false;
-    }
+    return sat;
 }
 
 #pragma pop_macro("cerr")
