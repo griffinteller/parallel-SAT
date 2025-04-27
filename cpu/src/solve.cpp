@@ -85,8 +85,8 @@ int main(int argc, char **argv) {
 
     Assignment assignment(numLiterals + 1, litAssign::UNASSIGNED);
 
-    auto start = steady_clock::now();
     bool result;
+    duration<double> elapsed;
     
     if (parallel) {
         // create thread pool
@@ -96,17 +96,38 @@ int main(int argc, char **argv) {
         }
 
         cout << "Running parallel algorithm..." << endl;
-        result = dpll_parallel(formula, assignment, pool);
+
+        auto start = steady_clock::now();
+        result = dpll_parallel(formula, assignment, pool, 0);
+        auto end = steady_clock::now();
+        elapsed = end - start;
 
         // reap worker threads
         threadPoolDestroy(&pool);
+
+        double unitMs   = totalUnitNs.load()   * 1e-6;
+        double pureMs   = totalPureNs.load()   * 1e-6;
+        double copyMs   = totalCopyNs.load()   * 1e-6;
+        double submitMs = totalSubmitNs.load() * 1e-6;
+        double spinMs   = totalSpinNs.load() * 1e-6;
+        double lockMs   = totalLockNs.load() * 1e-6;
+        double workMs   = totalWorkNs.load() * 1e-6;
+
+        cout << "\n=== Aggregate timings ===\n"
+                << "Total unit time:        " << unitMs   << " ms\n"
+                << "Total pure time:        " << pureMs   << " ms\n"
+                << "Total copy time:        " << copyMs   << " ms\n"
+                << "Total task submit time: " << submitMs << " ms\n"
+                << "Total task spin time:   " << spinMs << " ms\n"
+                << "Total worker lock time: " << lockMs << " ms\n"
+                << "Total local work time:  " << workMs << " ms\n";
     } else {
         cout << "Running sequential algorithm..." << endl;
+        auto start = steady_clock::now();
         result = dpll(formula, assignment);
+        auto end = steady_clock::now();
+        elapsed = end - start;
     }
-
-    auto end = steady_clock::now();
-    duration<double> elapsed = end - start;
 
     cout << "The formula is " << (result ? "SATISFIABLE." : "UNSATISFIABLE.") << endl;
     if (result) {

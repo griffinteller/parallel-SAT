@@ -3,8 +3,11 @@
 #include <pthread.h>
 #include <queue>
 #include <vector>
+#include <atomic>
 
 using namespace std;
+
+extern atomic<long long> totalLockNs;
 
 /**
  * Stucture for thread pool tasks
@@ -27,12 +30,17 @@ struct ThreadPoolTask {
  */
 struct ThreadPool {
     pthread_mutex_t lock;
-    pthread_cond_t cond;
-    queue<ThreadPoolTask> tasks;
+    pthread_cond_t  cond;
+    bool            stop;
+    size_t          queuedTasks;
+    size_t          activeTasks;
     vector<pthread_t> workers;
-    bool stop;
-    int activeTasks;
-    int queuedTasks;
+
+    ThreadPoolTask* tasksBuffer;
+    size_t          capacity;
+    size_t          head;
+    size_t          tail;
+    size_t          count;
 
     size_t workerCount() const { return workers.size(); }
 };

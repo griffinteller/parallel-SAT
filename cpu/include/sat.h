@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <unordered_map>
+#include <atomic>
 
 #include "pool.h"
 
@@ -16,6 +17,8 @@ enum litAssign {
 using Clause = vector<int>; // positive literal -> true, negative literal -> false
 using Formula = vector<Clause>;
 using Assignment = vector<litAssign>;
+
+extern atomic<long long> totalUnitNs, totalPureNs, totalCopyNs, totalSubmitNs, totalSpinNs, totalWorkNs;
 
 /**
  * Check if the DPLL algorithm has finished. It is finished if:
@@ -74,4 +77,4 @@ int chooseLiteral_parallel(const Formula &formula, Assignment &assignment);
  *  - satisfying assignment, if found
  */
 bool dpll(const Formula &formula, Assignment &assignment);
-bool dpll_parallel(const Formula &formula, Assignment &assignment, ThreadPool &pool);
+bool dpll_parallel(const Formula &formula, Assignment &assignment, ThreadPool &pool, int depth);
