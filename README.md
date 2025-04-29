@@ -37,4 +37,4 @@ Running the GPU solver:
 
 Build requirements:
 1. ```cmake --version``` >= 3.22
-2. CUDA on path
+2. CUDA >= 11 and `nvcc` on path
