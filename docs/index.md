@@ -4,7 +4,10 @@
 **Links:**
 
 [Project Proposal](proposal.md)
+
 [Milestone](milestone.md)
+
+[Final Report](final_report.md)
 
 **Deliverable schedule**
 

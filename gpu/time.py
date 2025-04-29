@@ -6,16 +6,12 @@ import argparse
 
 def test(exec_path):
     test_dirs = [
-        "uf50-218",
-        "uf75-325",
-        "uf100-430",
-        "uuf50-218",
-        "uuf75-325",
-        "uuf100-430",
+        "uf150-645",
+        "uuf150-645"
     ]
 
-    test_per_dir = 5
-    runs_per_test = 1
+    test_per_dir = 10
+    runs_per_test = 2
 
     # create dataframe with columns ["test", "avg time"]
     df_detailed = pd.DataFrame(columns=["test", "avg time"])

@@ -274,6 +274,16 @@ bool dpllMain() {
     // }
     // std::cout << std::endl;
 
+    std::chrono::high_resolution_clock::time_point kernelStartTime;
+    std::chrono::high_resolution_clock::time_point kernelEndTime;
+    std::chrono::high_resolution_clock::time_point hostStartTime;
+    std::chrono::high_resolution_clock::time_point hostEndTime;
+
+    double kernelTime = 0.0;
+    double hostTime = 0.0;
+
+    hostStartTime = std::chrono::high_resolution_clock::now();
+
     while (!assignmentStack.empty()) {
         // std::cout << "----------------" << std::endl;
         // std::cout << "Stack size: " << assignmentStack.size() << std::endl;
@@ -301,7 +311,19 @@ bool dpllMain() {
 
         // std::cout << "Propagating and checking" << std::endl;
         int numClausesCeil32 = ((hostFormula.numClauses - 1) / 32 + 1) * 32;
+
+        hostEndTime = std::chrono::high_resolution_clock::now();
+        hostTime += std::chrono::duration_cast<std::chrono::microseconds>(hostEndTime - hostStartTime).count();
+
+        kernelStartTime = std::chrono::high_resolution_clock::now();
+
         propagateAndCheck<<<activeInstances, numClausesCeil32>>>();
+        CC(cudaDeviceSynchronize());
+
+        kernelEndTime = std::chrono::high_resolution_clock::now();
+        kernelTime += std::chrono::duration_cast<std::chrono::microseconds>(kernelEndTime - kernelStartTime).count();
+
+        hostStartTime = std::chrono::high_resolution_clock::now();
 
         CC(cudaMemcpyFromSymbol(
             results, checkResults, 
@@ -363,6 +385,11 @@ bool dpllMain() {
             }
         }
     }
+
+    hostEndTime = std::chrono::high_resolution_clock::now();
+    hostTime += std::chrono::duration_cast<std::chrono::microseconds>(hostEndTime - hostStartTime).count();
+    std::cout << "Host time: " << hostTime / 1e3f << " ms" << std::endl;
+    std::cout << "Kernel time: " << kernelTime / 1e3f << " ms" << std::endl;
 
     return false;
 }
