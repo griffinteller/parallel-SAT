@@ -104,14 +104,14 @@ int main(int argc, char **argv) {
         double lockMs   = totalLockNs.load() * 1e-6;
         double workMs   = totalWorkNs.load() * 1e-6;
 
-        cout << "\n=== Aggregate timings ===\n"
-                << "Total unit time:        " << unitMs   << " ms\n"
-                << "Total pure time:        " << pureMs   << " ms\n"
-                << "Total copy time:        " << copyMs   << " ms\n"
-                << "Total task submit time: " << submitMs << " ms\n"
-                << "Total task spin time:   " << spinMs << " ms\n"
-                << "Total worker lock time: " << lockMs << " ms\n"
-                << "Total local work time:  " << workMs << " ms\n";
+        // cout << "\n=== Aggregate timings ===\n"
+        //         << "Total unit time:        " << unitMs   << " ms\n"
+        //         << "Total pure time:        " << pureMs   << " ms\n"
+        //         << "Total copy time:        " << copyMs   << " ms\n"
+        //         << "Total task submit time: " << submitMs << " ms\n"
+        //         << "Total task spin time:   " << spinMs << " ms\n"
+        //         << "Total worker lock time: " << lockMs << " ms\n"
+        //         << "Total local work time:  " << workMs << " ms\n";
     } else {
         cout << "Running sequential algorithm..." << endl;
         auto start = steady_clock::now();
