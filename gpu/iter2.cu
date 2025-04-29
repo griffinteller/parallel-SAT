@@ -121,12 +121,6 @@ __global__ void propagateAndCheck() {
         if (clauseIdx == 0) anyPropagated = false;
         __syncthreads();
 
-        // if (clauseIdx == 0) {
-        //     printFormula();
-        //     printf("|--------:\n");
-        // }
-        // __syncthreads();
-
         if (!clauseSatisfied) {
             int numUnassigned = 0;
             int lastUnassigned;
@@ -177,9 +171,6 @@ __global__ void propagateAndCheck() {
         }
     }
 
-    // printf("Clause False: %i, Clause Satisfied: %i, Found Unassigned: %i, Unassigned Literal: %i\n",
-    //        clauseFalse, clauseSatisfied, foundUnassigned, unassignedLiteral);
-
     if (clauseIdx == 0) {
         // first clause in block, initialize result
         checkResults[instance].allClausesSatisfied = clauseSatisfied;
@@ -197,7 +188,7 @@ __global__ void propagateAndCheck() {
     if (clauseFalse) result.anyClausesFalse = true;
     if (!clauseSatisfied) result.allClausesSatisfied = false;
     if (foundUnassigned) result.unassignedLiteral = unassignedLiteral;
-    // (creates a ton of unnecessary traffic, anything we can do about this?)
+    // (creates unnecessary traffic, anything we can do about this?)
 }
 
 void setupGlobals(const Formula& formula) {
@@ -262,37 +253,7 @@ bool dpllMain() {
 
     CheckResult results[maxInstances];
 
-    // print formula
-    // std::cout << "Formula:" << std::endl;
-    // for (int i = 0; i < hostFormula.numClauses; i++) {
-    //     const Clause& clause = hostFormula.clauses[i];
-    //     std::cout << "Clause " << i << ": ";
-    //     for (int j = 0; j < clause.count; j++) {
-    //         std::cout << clause.literals[j] << " ";
-    //     }
-    //     std::cout << std::endl;
-    // }
-    // std::cout << std::endl;
-
-    std::chrono::high_resolution_clock::time_point kernelStartTime;
-    std::chrono::high_resolution_clock::time_point kernelEndTime;
-    std::chrono::high_resolution_clock::time_point hostStartTime;
-    std::chrono::high_resolution_clock::time_point hostEndTime;
-
-    double kernelTime = 0.0;
-    double hostTime = 0.0;
-
-    hostStartTime = std::chrono::high_resolution_clock::now();
-
     while (!assignmentStack.empty()) {
-        // std::cout << "----------------" << std::endl;
-        // std::cout << "Stack size: " << assignmentStack.size() << std::endl;
-        // std::cout << "Recycling size: " << assignmentRecycling.size() << std::endl;
-        // std::cout << "Arena head: " << assignmentArenaHead << std::endl;
-        // std::cout << std::endl;
-
-        // std::cout << "Grabbing assignments" << std::endl;
-
         // pop and copy instance assignments
         hostInstanceAssignments.clear();
         for (int i = 0; i < maxInstances && !assignmentStack.empty(); i++) {
@@ -301,44 +262,18 @@ bool dpllMain() {
             hostInstanceAssignments.push_back(assignment);
         }
         int activeInstances = hostInstanceAssignments.size();
-        // std::cout << "Stack size: " << assignmentStack.size() << std::endl;
-
-        // std::cout << "Active instances: " << activeInstances << std::endl;
 
         CC(cudaMemcpyToSymbol(
             instanceAssignments, hostInstanceAssignments.data(), 
             activeInstances * sizeof(AssignedValue*)));
 
-        // std::cout << "Propagating and checking" << std::endl;
-        int numClausesCeil32 = ((hostFormula.numClauses - 1) / 32 + 1) * 32;
-
-        hostEndTime = std::chrono::high_resolution_clock::now();
-        hostTime += std::chrono::duration_cast<std::chrono::microseconds>(hostEndTime - hostStartTime).count();
-
-        kernelStartTime = std::chrono::high_resolution_clock::now();
+        int numClausesCeil32 = ((hostFormula.numClauses - 1) / 32 + 1) * 32;;
 
         propagateAndCheck<<<activeInstances, numClausesCeil32>>>();
-        CC(cudaDeviceSynchronize());
-
-        kernelEndTime = std::chrono::high_resolution_clock::now();
-        kernelTime += std::chrono::duration_cast<std::chrono::microseconds>(kernelEndTime - kernelStartTime).count();
-
-        hostStartTime = std::chrono::high_resolution_clock::now();
 
         CC(cudaMemcpyFromSymbol(
             results, checkResults, 
             sizeof(CheckResult) * activeInstances));
-
-        // std::cout << "Results:" << std::endl;
-        // for (int i = 0; i < activeInstances; i++) {
-        //     const CheckResult& result = results[i];
-        //     std::cout << "Instance " << i << ": "
-        //               << "allClausesSatisfied: " << result.allClausesSatisfied
-        //               << ", anyClausesFalse: " << result.anyClausesFalse
-        //               << ", unassignedLiteral: " << result.unassignedLiteral
-        //               << std::endl;
-        // }
-        // std::cout << std::endl;
 
         // handle results
         for (int i = 0; i < activeInstances; i++) {
@@ -363,33 +298,25 @@ bool dpllMain() {
                 AssignedValue* a1 = hostInstanceAssignments[i];
                 AssignedValue* a2 = allocAssignment();
 
-                // copy a1 to a2
                 CC(cudaMemcpy(
                     a2, a1, 
                     sizeof(AssignedValue) * hostFormula.numLiterals,
                     cudaMemcpyDeviceToDevice));
 
-                // set unassignedLiteral to TRUE on device in a1
                 CC(cudaMemcpy(
                     &a1[result.unassignedLiteral - 1], &lTrue,
                     sizeof(AssignedValue), cudaMemcpyHostToDevice));
 
-                // set unassignedLiteral to FALSE on device in a2
                 CC(cudaMemcpy(
                     &a2[result.unassignedLiteral - 1], &lFalse,
                     sizeof(AssignedValue), cudaMemcpyHostToDevice));
 
-                // push a1 and a2 to stack
+                // push both assignments to stack
                 assignmentStack.push_back(a1);
                 assignmentStack.push_back(a2);
             }
         }
     }
-
-    hostEndTime = std::chrono::high_resolution_clock::now();
-    hostTime += std::chrono::duration_cast<std::chrono::microseconds>(hostEndTime - hostStartTime).count();
-    std::cout << "Host time: " << hostTime / 1e3f << " ms" << std::endl;
-    std::cout << "Kernel time: " << kernelTime / 1e3f << " ms" << std::endl;
 
     return false;
 }

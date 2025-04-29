@@ -72,7 +72,6 @@ __global__ void propagateUnits(volatile Assignment* assignment, volatile bool* a
     for (int i = 0; i < clause.count; i++) {
         int literal = clause.literals[i];
         AssignedValue value = getAssig(assignment, literal);
-        // printf("literal: %d  value: %d\n", literal, value);
         if (value == TRUE) {
             // clause is satisfied
             return;
@@ -86,7 +85,6 @@ __global__ void propagateUnits(volatile Assignment* assignment, volatile bool* a
 
     if (numUnassigned != 1) return;
     setAssig(assignment, lastUnassigned, TRUE);
-    // printf("lastUnassigned: %d  numUnassigned: %d\n", lastUnassigned, numUnassigned);
     *anyPropagated = true;
 }
 
@@ -216,18 +214,10 @@ bool dpllHostDirected(const Formula& formula) {
             if (!shouldContinue) break;
         }
     
-        // pure literal propagation
-        // propagatePure<<<numLitBlocks, litBlockSize>>>(devAssignment);
-
 
         // copy and print assignment
         std::vector<AssignedValue> retAssignment(formula.numLiterals);
         cudaMemcpy(retAssignment.data(), devAssignmentView.values, sizeof(int) * formula.numLiterals, cudaMemcpyDeviceToHost);
-        // for (int i = 0; i < formula.numLiterals; i++) {
-        //     std::cout << retAssignment[i] << " ";
-        // }
-
-        // std::cout << "done propagating" << std::endl;
 
         CC(cudaMemcpy(allClausesSatisfied, &t, sizeof(bool), cudaMemcpyHostToDevice));
         CC(cudaMemcpy(anyFalseClauses, &f, sizeof(bool), cudaMemcpyHostToDevice));
@@ -236,14 +226,12 @@ bool dpllHostDirected(const Formula& formula) {
         bool allTrue;
         CC(cudaMemcpy(&allTrue, allClausesSatisfied, sizeof(bool), cudaMemcpyDeviceToHost));
         if (allTrue) {
-            // std::cout << "found all clauses satisfied" << std::endl;
             return true;
         }
 
         bool anyFalse;
         CC(cudaMemcpy(&anyFalse, anyFalseClauses, sizeof(bool), cudaMemcpyDeviceToHost));
         if (anyFalse) {
-            // std::cout << "found false clause" << std::endl;
             return false;
         }
 
@@ -259,13 +247,10 @@ bool dpllHostDirected(const Formula& formula) {
         assert(unassignedLiteral > 0);
 
         retAssignment[unassignedLiteral - 1] = TRUE;
-        // std::cout << "found unassigned literal " << unassignedLiteral << std::endl;
-        // std::cout << "assigning " << unassignedLiteral << " to TRUE" << std::endl;
         CC(cudaMemcpy(devAssignmentView.values, retAssignment.data(), sizeof(int) * formula.numLiterals, cudaMemcpyHostToDevice));
         if (inner()) return true;
 
         retAssignment[unassignedLiteral - 1] = FALSE;
-        // std::cout << "assigning " << unassignedLiteral << " to FALSE" << std::endl;
         CC(cudaMemcpy(devAssignmentView.values, retAssignment.data(), sizeof(int) * formula.numLiterals, cudaMemcpyHostToDevice));
         return inner();
     };
